@@ -109,6 +109,7 @@ article img, .mermaid svg { max-width: 100%; }
 .level { display: inline-block; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; padding: 2px 7px; border: 1px solid var(--fg); border-radius: 4px; margin-right: 8px; vertical-align: 1px; }
 .baseline-card { display: flex; gap: 16px; align-items: center; justify-content: space-between; padding: 14px 16px; margin-bottom: 24px; background: var(--code); border-radius: 8px; font-size: 14.5px; }
 .baseline-card .btn { flex: none; }
+.baseline-card > div { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .analysis { margin: 16px 0 40px; padding: 20px 24px; background: var(--code); border-radius: 8px; font-size: 15px; }
 .analysis-head { display: flex; justify-content: space-between; align-items: center; font-size: 13px; margin-bottom: 10px; }
 .analysis p { margin: 0 0 16px; }
