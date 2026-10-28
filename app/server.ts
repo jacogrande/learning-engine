@@ -2,7 +2,7 @@
 import index from "./client/index.html";
 import { listCourses, getCourse, getDoc } from "./server/content";
 import { db, id, now } from "./server/db";
-import { enqueue, cancel, jobs, jobLog } from "./server/jobs";
+import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent } from "./server/events";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -111,6 +111,7 @@ Bun.serve({
     },
 
     "/api/jobs": () => json(jobs()),
+    "/api/courses/:slug/jobs": (req) => json(history(req.params.slug)),
     "/api/jobs/:id/log": (req) => json(jobLog(req.params.id)),
     "/api/jobs/:id/cancel": { POST: (req) => { cancel(req.params.id); return json({ ok: true }); } },
 

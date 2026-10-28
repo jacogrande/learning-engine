@@ -26,6 +26,9 @@ function connect() {
   if (es) return;
   es = new EventSource("/api/events");
   es.onmessage = (m) => { const ev = JSON.parse(m.data); for (const l of listeners) l(ev); };
+  // After a dropped connection (server restart, sleep), anything may have changed: refetch.
+  let opened = false;
+  es.onopen = () => { if (opened) for (const l of listeners) l({ type: "content" }); opened = true; };
 }
 export function useEvent(type: string, fn: Listener) {
   useEffect(() => {
@@ -48,7 +51,9 @@ export function useLive<T>(url: string | null) {
 
 export function useJobs() {
   const [jobs, setJobs] = useState<Job[]>([]);
-  useEffect(() => { get<Job[]>("/api/jobs").then(setJobs); }, []);
+  const load = useCallback(() => { get<Job[]>("/api/jobs").then(setJobs); }, []);
+  useEffect(load, [load]);
+  useEvent("content", load);
   useEvent("job", useCallback((ev: { job: Job }) => {
     setJobs((js) => {
       const rest = js.filter((j) => j.id !== ev.job.id);

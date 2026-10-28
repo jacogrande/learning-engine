@@ -1,5 +1,6 @@
 node_modules/
 spike/out/
 data/*.db*
+data/jobs/
 *.tmp.*
 .DS_Store

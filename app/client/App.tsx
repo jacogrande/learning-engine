@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { get, post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade } from "./api";
+import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade, type Job } from "./api";
 import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
@@ -106,7 +106,11 @@ function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }
 
 function Outline({ course }: { course: Course }) {
   const jobs = useJobs();
+  const { data: past } = useLive<Job[]>(`/api/courses/${course.slug}/jobs`);
   const running = (ref?: string) => jobs.some((j) => j.course === course.slug && (ref ? j.ref === ref : j.kind === "outline"));
+  // The last run for a module, if it did not finish: shown so a Generate click reads as "resume".
+  const broken = (ref: string) => past?.find((j) => j.ref === ref && ["interrupted", "failed", "cancelled"].includes(j.status));
+
   if (course.stage === "baseline")
     return <p className="muted empty">The outline is built from your baseline. <Link to={`/c/${course.slug}/baseline`}>Take it first →</Link></p>;
   if (course.stage === "assessed")
@@ -117,20 +121,26 @@ function Outline({ course }: { course: Course }) {
     );
   return (
     <ol className="modules">
-      {course.modules.map((m) => (
-        <li key={m.id}>
-          <div className="module-head">
-            <h3>{m.status === "ready" ? <Link to={`/c/${course.slug}/m/${m.id}`}>{m.title}</Link> : m.title}</h3>
-            {m.status === "ready" ? (
-              <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">Open</Link>
-            ) : (
-              <button disabled={running(m.id)} onClick={() => post(`/api/courses/${course.slug}/modules/${m.id}/generate`)}>{running(m.id) ? "Generating…" : "Generate"}</button>
-            )}
-          </div>
-          {m.summary && <p className="muted">{m.summary}</p>}
-          {m.objectives && <ul className="objectives">{m.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>}
-        </li>
-      ))}
+      {course.modules.map((m) => {
+        const gen = running(m.id), n = m.sections.length, b = !gen && broken(m.id);
+        return (
+          <li key={m.id}>
+            <div className="module-head">
+              <h3>{n ? <Link to={`/c/${course.slug}/m/${m.id}`}>{m.title}</Link> : m.title}</h3>
+              <div className="module-actions">
+                {gen && <span className="muted">Generating{n ? ` · ${n} section${n > 1 ? "s" : ""} so far` : "…"}</span>}
+                {n > 0 && <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">Open</Link>}
+                {!gen && (n === 0 || b) && (
+                  <button onClick={() => post(`/api/courses/${course.slug}/modules/${m.id}/generate`)}>{b ? "Resume" : "Generate"}</button>
+                )}
+              </div>
+            </div>
+            {b && <p className="muted note">Last run {b.status}{b.error ? ` — ${b.error}` : ""}.{n > 0 && ` Resume keeps the ${n} section${n === 1 ? "" : "s"} already written.`}</p>}
+            {m.summary && <p className="muted">{m.summary}</p>}
+            {m.objectives && <ul className="objectives">{m.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>}
+          </li>
+        );
+      })}
     </ol>
   );
 }

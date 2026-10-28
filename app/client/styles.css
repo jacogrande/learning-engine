@@ -67,6 +67,8 @@ pre code { background: none; padding: 0; }
 .modules > li { padding: 20px 0; border-top: 1px solid var(--faint); counter-increment: m; }
 .modules > li:last-child { border-bottom: 1px solid var(--faint); }
 .module-head { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+.module-actions { display: flex; gap: 10px; align-items: center; flex: none; font-size: 13.5px; }
+.modules .note { font-size: 13.5px; }
 .module-head h3::before { content: counter(m, decimal-leading-zero) "  "; color: var(--muted); font-weight: 400; font-variant-numeric: tabular-nums; }
 .module-head h3 a { text-decoration: none; } .module-head h3 a:hover { text-decoration: underline; text-underline-offset: 3px; }
 .modules p { margin: 6px 0 0; font-size: 14.5px; }

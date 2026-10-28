@@ -12,6 +12,8 @@ Arguments: $ARGUMENTS (course slug, then module id as it appears in `outline.md`
 
 Read `course.md`, `outline.md` (find this module's objectives), `quizzes/baseline-assessment.md` (the learner's level and gaps), `research/map.md`, and any `modules/*/` sections that already exist (so you build on them and do not repeat them).
 
+**If this module's directory already has research or section files, a previous run was interrupted. Keep them.** Read what is there, skip research briefs that already have a file, and write only the sections that are missing, continuing the numbering. Do not rewrite finished sections.
+
 ## 2. Research in depth
 
 Split the module's objectives into 2–3 research briefs. Launch one `module-researcher` subagent per brief, **in parallel**, each writing to `content/courses/<slug>/modules/<id>/research/<brief>.md`. Each brief lists the exact objectives it owns and says explicitly what is out of scope. Wait for all.
