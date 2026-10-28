@@ -45,27 +45,24 @@ function Fence({ lang, code, children }: { lang: string; code: string; children:
   return <pre><code>{children}</code></pre>;
 }
 
+// Defined once at module scope: new component identities on each render would
+// remount every quiz and drop focus from its inputs on every keystroke.
+const plugins = [remarkGfm, remarkDirective, directives];
+const components = {
+  pre: ({ children }: any) => <>{children}</>,   // fences are handled in `code`
+  code: ({ className, children, ...rest }: any) => {
+    const lang = /language-(\w+)/.exec(className ?? "")?.[1];
+    const code = String(children).replace(/\n$/, "");
+    const inline = !className && !code.includes("\n");
+    return inline ? <code {...rest}>{children}</code> : <Fence lang={lang ?? ""} code={code}>{children}</Fence>;
+  },
+  div: ({ node, children, ...props }: any) => {
+    const kind = props["data-directive"];
+    if (!kind) return <div {...props}>{children}</div>;
+    return <aside className={`callout callout-${props.type ?? "note"}`} data-kind={kind}>{children}</aside>;
+  },
+};
+
 export function Markdown({ body }: { body: string }) {
-  return (
-    <ReactMarkdown
-      remarkPlugins={[remarkGfm, remarkDirective, directives]}
-      components={{
-        pre: ({ children }) => <>{children}</>,   // fences are handled in `code`
-        code: ({ className, children, ...rest }) => {
-          const lang = /language-(\w+)/.exec(className ?? "")?.[1];
-          const code = String(children).replace(/\n$/, "");
-          const inline = !className && !code.includes("\n");
-          return inline ? <code {...rest}>{children}</code> : <Fence lang={lang ?? ""} code={code}>{children}</Fence>;
-        },
-        div: ({ node, children, ...props }) => {
-          const kind = (props as any)["data-directive"];
-          if (!kind) return <div {...props}>{children}</div>;
-          const type = (props as any).type ?? "note";
-          return <aside className={`callout callout-${type}`} data-kind={kind}>{children}</aside>;
-        },
-      }}
-    >
-      {body}
-    </ReactMarkdown>
-  );
+  return <ReactMarkdown remarkPlugins={plugins} components={components}>{body}</ReactMarkdown>;
 }
