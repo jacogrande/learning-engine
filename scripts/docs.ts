@@ -5,7 +5,7 @@ import { readdir, stat } from "node:fs/promises";
 import { join, relative, resolve, extname, basename } from "node:path";
 
 const DOCS_DIR = resolve(import.meta.dir, "..", "docs");
-const PORT = Number(process.env.PORT ?? 4000);
+const PORT = Number(process.env.PORT ?? 8000);
 
 type Node = { name: string; path: string; children?: Node[] };
 
