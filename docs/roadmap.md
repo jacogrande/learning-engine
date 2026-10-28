@@ -11,12 +11,12 @@ A personal course system where Claude Code researches a subject, writes the cour
 
 ## Phases
 
-### Phase 0 — Spike *(half a day)*
+### Phase 0 — Spike *(half a day)* — done, see [phase-0-results.md](phase-0-results.md)
 Prove the one hard dependency: `claude -p` runs headlessly against the Pro/Max login, streams NDJSON, and can invoke a skill and a subagent. If this fails, the premise changes and so does the plan.
 
 **Done when:** a button on a bare HTML page triggers a Claude Code run and streams its output back.
 
-### Phase 1 — Read a course *(1–2 weeks)*
+### Phase 1 — Read a course *(1–2 weeks)* — done, see [phase-1-results.md](phase-1-results.md)
 The skeleton: Vite + React client, Hono server, Drizzle schema, chokidar indexer with SSE hot reload, content grammar v1, the three-pane layout. Skills for `/start-course` (clarify → breadth research → scaffold → baseline test), `generate-outline`, and `generate-module`. A one-at-a-time job queue with live progress.
 
 **Done when:** you run `/start-course`, take the baseline, get an outline, generate a module, and read it in the browser as sections land.
