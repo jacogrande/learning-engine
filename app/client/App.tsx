@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
 import { get, post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade } from "./api";
 import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
@@ -11,7 +11,7 @@ function usePath() {
   return path;
 }
 export function navigate(to: string) { history.pushState(null, "", to); dispatchEvent(new PopStateEvent("popstate")); }
-const Link = ({ to, children, className }: { to: string; children: React.ReactNode; className?: string }) => (
+const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
   <a href={to} className={className} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>
 );
 
@@ -20,13 +20,32 @@ export function App() {
   const m = /^\/c\/([^/]+)(?:\/(baseline)|\/m\/([^/]+)(?:\/([^/]+))?)?/.exec(path);
   return (
     <>
-      {!m ? <Courses /> : m[2] ? <BaselineReview slug={m[1]} /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : <CoursePage slug={m[1]} />}
+      {!m ? <Courses /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />}
       <JobBar />
     </>
   );
 }
 
-// --- theme ---------------------------------------------------------------
+// --- shell: top bar with breadcrumbs, theme ------------------------------
+type Crumb = { label: string; to?: string };
+
+function Shell({ crumbs, children, className }: { crumbs: Crumb[]; children: ReactNode; className?: string }) {
+  return (
+    <>
+      <header className="top">
+        <nav className="crumbs">
+          <Link to="/" className="brand">Learning</Link>
+          {crumbs.map((c, i) => (
+            <span key={i}><span className="sep">/</span>{c.to ? <Link to={c.to}>{c.label}</Link> : <span className="current">{c.label}</span>}</span>
+          ))}
+        </nav>
+        <Theme />
+      </header>
+      <div className={className}>{children}</div>
+    </>
+  );
+}
+
 function Theme() {
   const [t, setT] = useState(localStorage.getItem("theme") ?? "system");
   const pick = (v: string) => {
@@ -42,54 +61,114 @@ function Theme() {
 // --- / -------------------------------------------------------------------
 function Courses() {
   const { data } = useLive<Course[]>("/api/courses");
+  const status = (c: Course) =>
+    c.stage === "baseline" ? "Baseline waiting" : c.stage === "assessed" ? "Outline pending" : `${c.modules.filter((m) => m.status === "ready").length} of ${c.modules.length} modules generated`;
   return (
-    <main className="page">
-      <header className="page-head"><h1>Courses</h1><Theme /></header>
+    <Shell crumbs={[{ label: "Courses" }]} className="page">
+      <h1>Courses</h1>
       {data?.length === 0 && (
         <p className="muted">No courses yet. In a terminal, run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
       )}
       <ul className="cards">
         {data?.map((c) => (
           <li key={c.slug}>
-            <Link to={`/c/${c.slug}`}>
+            <Link to={c.stage === "baseline" ? `/c/${c.slug}/baseline` : `/c/${c.slug}`}>
               <h2>{c.title}</h2>
-              <p className="muted">{c.stage === "baseline" ? "Baseline test waiting" : c.stage === "assessed" ? "Outline pending" : `${c.modules.filter((m) => m.status === "ready").length}/${c.modules.length} modules generated`}</p>
+              <p className="muted">{status(c)}{c.depth ? ` · ${c.depth}` : ""}</p>
             </Link>
           </li>
         ))}
       </ul>
-    </main>
+    </Shell>
   );
 }
 
-// --- /c/:slug ------------------------------------------------------------
-function CoursePage({ slug }: { slug: string }) {
+// --- /c/:slug and /c/:slug/baseline --------------------------------------
+function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }) {
   const { data: course, error } = useLive<Course>(`/api/courses/${slug}`);
-  if (error) return <main className="page"><p>Course not found.</p></main>;
-  if (!course) return null;
+  const { data: state, reload } = useLive<QuizState>(`/api/courses/${slug}/quiz/baseline`);
+  if (error) return <Shell crumbs={[{ label: "Courses", to: "/" }, { label: slug }]} className="page"><p>Course not found.</p></Shell>;
+  if (!course || !state) return null;
   return (
-    <main className="page">
-      <header className="page-head">
-        <div><Link to="/" className="crumb">Courses</Link><h1>{course.title}</h1></div>
-        <Theme />
-      </header>
+    <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title }]} className="page">
+      <h1>{course.title}</h1>
       {course.description && <p className="lede">{course.description}</p>}
-      {course.stage === "baseline" ? <Baseline slug={slug} /> : <Outline course={course} />}
-    </main>
+      <nav className="tabs">
+        <Link to={`/c/${slug}`} className={tab === "outline" ? "active" : ""}>Outline</Link>
+        <Link to={`/c/${slug}/baseline`} className={tab === "baseline" ? "active" : ""}>
+          Baseline{state.attempt?.grade ? <span className="level">{state.attempt.grade.level}</span> : null}
+        </Link>
+      </nav>
+      {tab === "outline" ? <Outline course={course} /> : <Baseline slug={slug} state={state} reload={reload} />}
+    </Shell>
   );
 }
 
-// Answers are drafted to the server as you type, so nothing is lost on reload.
-function Baseline({ slug }: { slug: string }) {
+function Outline({ course }: { course: Course }) {
+  const jobs = useJobs();
+  const running = (ref?: string) => jobs.some((j) => j.course === course.slug && (ref ? j.ref === ref : j.kind === "outline"));
+  if (course.stage === "baseline")
+    return <p className="muted empty">The outline is built from your baseline. <Link to={`/c/${course.slug}/baseline`}>Take it first →</Link></p>;
+  if (course.stage === "assessed")
+    return (
+      <div className="actions">
+        <button className="primary" disabled={running()} onClick={() => post(`/api/courses/${course.slug}/outline`)}>{running() ? "Building outline…" : "Build outline"}</button>
+      </div>
+    );
+  return (
+    <ol className="modules">
+      {course.modules.map((m) => (
+        <li key={m.id}>
+          <div className="module-head">
+            <h3>{m.status === "ready" ? <Link to={`/c/${course.slug}/m/${m.id}`}>{m.title}</Link> : m.title}</h3>
+            {m.status === "ready" ? (
+              <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">Open</Link>
+            ) : (
+              <button disabled={running(m.id)} onClick={() => post(`/api/courses/${course.slug}/modules/${m.id}/generate`)}>{running(m.id) ? "Generating…" : "Generate"}</button>
+            )}
+          </div>
+          {m.summary && <p className="muted">{m.summary}</p>}
+          {m.objectives && <ul className="objectives">{m.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+// Baseline tab: form → submitted/assessing → review. Answers draft to the server as you type.
+function Baseline({ slug, state, reload }: { slug: string; state: QuizState; reload: () => void }) {
   const { data: doc } = useLive<Doc>(`/api/courses/${slug}/doc?path=quizzes/baseline.md`);
-  const [state, setState] = useState<QuizState | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
+  const jobs = useJobs();
+  const busy = jobs.some((j) => j.course === slug && j.kind === "assess");
+  useEffect(() => { if (!busy) reload(); }, [busy]);   // pick up the grade when the job ends
+
+  if (!doc) return <p className="muted empty">Baseline test not written yet.</p>;
+  const { attempt } = state;
+  if (!attempt) return <BaselineForm slug={slug} doc={doc} draft={state.draft} onSubmit={reload} />;
+
+  const results = Object.fromEntries((attempt.grade?.questions ?? []).map((q) => [q.id, q]));
+  return (
+    <>
+      <p className="muted">Taken {new Date(attempt.createdAt).toLocaleString()}</p>
+      {attempt.grade ? (
+        <Analysis grade={attempt.grade} />
+      ) : (
+        <div className="actions">
+          <span className="muted">{busy ? "Assessing…" : "Assessment did not finish."}</span>
+          {!busy && <button onClick={() => post(`/api/courses/${slug}/baseline/assess`)}>Retry assessment</button>}
+        </div>
+      )}
+      <QuizReview value={{ answers: attempt.answers, results }}>
+        <Markdown body={doc.body.replace(/^[^\n`]+\n/, "")} />
+      </QuizReview>
+    </>
+  );
+}
+
+function BaselineForm({ slug, doc, draft, onSubmit }: { slug: string; doc: Doc; draft: Record<string, string> | null; onSubmit: () => void }) {
+  const [answers, setAnswers] = useState<Record<string, string>>(draft ?? {});
   const [saved, setSaved] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const jobs = useJobs();
-  const busy = jobs.some((j) => j.course === slug);
-
-  useEffect(() => { get<QuizState>(`/api/courses/${slug}/quiz/baseline`).then((s) => { setState(s); if (s.draft) setAnswers(s.draft); }); }, [slug]);
 
   const update = (id: string, v: string) => {
     const next = { ...answers, [id]: v };
@@ -101,24 +180,11 @@ function Baseline({ slug }: { slug: string }) {
     clearTimeout(timer.current);
     await put(`/api/courses/${slug}/quiz/baseline/draft`, { answers });
     await post(`/api/courses/${slug}/baseline`, { answers });
-    setState((s) => ({ draft: null, attempt: { id: "", answers, grade: null, createdAt: new Date().toISOString() } }));
+    onSubmit();
   };
-
-  if (!doc || !state) return <p className="muted">{doc ? "" : "Baseline test not written yet."}</p>;
-
-  if (state.attempt)
-    return (
-      <section className="actions">
-        <p className="muted">Submitted {new Date(state.attempt.createdAt).toLocaleString()}. {busy ? "Assessing…" : "Assessment did not finish."}</p>
-        {!busy && <button onClick={() => post(`/api/courses/${slug}/baseline/assess`)}>Retry assessment</button>}
-        <Link to={`/c/${slug}/baseline`} className="btn">Your answers</Link>
-      </section>
-    );
-
   const n = Object.values(answers).filter(Boolean).length;
   return (
-    <section>
-      <h2>Baseline</h2>
+    <>
       <QuizForm value={{ answers, set: update }}>
         <Markdown body={doc.body} />
       </QuizForm>
@@ -126,7 +192,7 @@ function Baseline({ slug }: { slug: string }) {
         <button className="primary" disabled={n === 0} onClick={submit}>Submit {n} answers</button>
         <span className="muted">{saved ? (n ? "Draft saved" : "") : "Saving…"}</span>
       </div>
-    </section>
+    </>
   );
 }
 
@@ -148,73 +214,6 @@ function Analysis({ grade }: { grade: Grade }) {
   );
 }
 
-// /c/:slug/baseline — the test as you answered it, with the grader's notes.
-function BaselineReview({ slug }: { slug: string }) {
-  const { data: course } = useLive<Course>(`/api/courses/${slug}`);
-  const { data: doc } = useLive<Doc>(`/api/courses/${slug}/doc?path=quizzes/baseline.md`);
-  const { data: state } = useLive<QuizState>(`/api/courses/${slug}/quiz/baseline`);
-  if (!course || !doc || !state) return null;
-  const attempt = state.attempt;
-  if (!attempt) return <main className="page"><p className="muted">Not taken yet.</p></main>;
-  const results = Object.fromEntries((attempt.grade?.questions ?? []).map((q) => [q.id, q]));
-  return (
-    <main className="page">
-      <header className="page-head">
-        <div><Link to={`/c/${slug}`} className="crumb">← {course.title}</Link><h1>Baseline</h1></div>
-        <Theme />
-      </header>
-      <p className="muted">Taken {new Date(attempt.createdAt).toLocaleString()}</p>
-      {attempt.grade ? <Analysis grade={attempt.grade} /> : <p className="muted">Not assessed yet.</p>}
-      <QuizReview value={{ answers: attempt.answers, results }}>
-        <Markdown body={doc.body.replace(/^[^\n`]+\n/, "")} />
-      </QuizReview>
-    </main>
-  );
-}
-
-function Outline({ course }: { course: Course }) {
-  const jobs = useJobs();
-  const { data: state } = useLive<QuizState>(`/api/courses/${course.slug}/quiz/baseline`);
-  const running = (ref?: string) => jobs.some((j) => j.course === course.slug && (ref ? j.ref === ref : j.kind === "outline"));
-  const grade = state?.attempt?.grade;
-  const card = grade && (
-    <div className="baseline-card">
-      <div><span className="level">{grade.level}</span> {grade.summary}</div>
-      <Link to={`/c/${course.slug}/baseline`} className="btn">Your baseline</Link>
-    </div>
-  );
-  if (course.stage === "assessed")
-    return (
-      <section>
-        {card}
-        <div className="actions">
-          <button className="primary" disabled={running()} onClick={() => post(`/api/courses/${course.slug}/outline`)}>{running() ? "Building outline…" : "Build outline"}</button>
-        </div>
-      </section>
-    );
-  return (
-    <section>
-      {card}
-      <ol className="modules">
-        {course.modules.map((m) => (
-          <li key={m.id}>
-            <div className="module-head">
-              <h3>{m.status === "ready" ? <Link to={`/c/${course.slug}/m/${m.id}`}>{m.title}</Link> : m.title}</h3>
-              {m.status === "ready" ? (
-                <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">Open</Link>
-              ) : (
-                <button disabled={running(m.id)} onClick={() => post(`/api/courses/${course.slug}/modules/${m.id}/generate`)}>{running(m.id) ? "Generating…" : "Generate"}</button>
-              )}
-            </div>
-            {m.summary && <p className="muted">{m.summary}</p>}
-            {m.objectives && <ul className="objectives">{m.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>}
-          </li>
-        ))}
-      </ol>
-    </section>
-  );
-}
-
 // --- /c/:slug/m/:id/:file ------------------------------------------------
 function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file?: string }) {
   const { data: course } = useLive<Course>(`/api/courses/${slug}`);
@@ -225,11 +224,11 @@ function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file
   if (!course || !mod) return null;
 
   const i = mod.sections.findIndex((s) => s.file === current);
-  const next = mod.sections[i + 1];
+  const prev = mod.sections[i - 1], next = mod.sections[i + 1];
+  const n = course.modules.findIndex((m) => m.id === moduleId);
   return (
-    <div className="reader">
+    <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title, to: `/c/${slug}` }, { label: mod.title }]} className="reader">
       <nav className="side">
-        <Link to={`/c/${slug}`} className="crumb">← {course.title}</Link>
         <div className="side-title">{mod.title}</div>
         <ul>
           {mod.sections.map((s) => (
@@ -237,26 +236,27 @@ function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file
           ))}
         </ul>
         <div className="side-title muted">Modules</div>
-        <ul>
+        <ol className="side-modules">
           {course.modules.map((m) => (
             <li key={m.id}>
               {m.status === "ready" ? <Link to={`/c/${slug}/m/${m.id}`} className={m.id === moduleId ? "active" : ""}>{m.title}</Link> : <span className="muted dim">{m.title}</span>}
             </li>
           ))}
-        </ul>
-        <div className="side-foot"><Theme /></div>
+        </ol>
       </nav>
       <main className="content">
-        {doc ? (
+        {doc && (
           <article>
+            <p className="kicker">Module {String(n + 1).padStart(2, "0")} · {i + 1} of {mod.sections.length}</p>
             <h1>{doc.frontmatter.title ?? mod.sections[i]?.title}</h1>
             <Markdown body={doc.body} />
             <footer className="article-foot">
-              {next ? <Link to={`/c/${slug}/m/${moduleId}/${next.file}`} className="btn">Next: {next.title} →</Link> : <Link to={`/c/${slug}`} className="btn">Back to outline</Link>}
+              {prev ? <Link to={`/c/${slug}/m/${moduleId}/${prev.file}`} className="btn">← {prev.title}</Link> : <span />}
+              {next ? <Link to={`/c/${slug}/m/${moduleId}/${next.file}`} className="btn">{next.title} →</Link> : <Link to={`/c/${slug}`} className="btn">Back to outline →</Link>}
             </footer>
           </article>
-        ) : null}
+        )}
       </main>
-    </div>
+    </Shell>
   );
 }
