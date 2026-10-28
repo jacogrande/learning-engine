@@ -68,6 +68,13 @@ explanation: Flowcharts show sequence. Value stream maps add lead time and proce
 
 Rules: `id` is unique within the course, stable, and kebab-case (`q-<module>-<nn>`). `answer` is a 0-based index. `mcq` needs `explanation`; `short` needs `rubric`. Keep prompts self-contained — the reader may see the question without the paragraph above it.
 
+The body is YAML, so any prose value that contains `: `, starts with a quote, or runs long goes in a block scalar:
+
+```yaml
+prompt: >-
+  Fix this: "The report was late, the client noticed."
+```
+
 ## Stable ids
 
 Once a quiz `id` exists, never change it or reuse it. When editing a section, preserve existing ids and mint new ones only for new questions.
