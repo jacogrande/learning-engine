@@ -32,4 +32,4 @@ level: <novice | familiar | intermediate | advanced>
 | q-base-01 | correct / partial / wrong / skipped | <one line> |
 ```
 
-4. Return the structured result the caller asked for (`level`, `summary`, `strengths`, `gaps`) — same content as the file.
+4. Return the structured result the caller asked for — `level`, `summary`, `strengths`, `gaps`, and `questions` (one entry per question: `id`, `result`, `note`) — the same content as the file. The `note` is addressed to the learner, one or two sentences: what was right, what was missing.

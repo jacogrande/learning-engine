@@ -13,7 +13,38 @@ export type QuizSpec = {
 
 export const QuizForm = createContext<{ answers: Record<string, string>; set: (id: string, v: string) => void } | null>(null);
 
+// Read-only: the learner's saved answer plus the grader's note.
+export type QuestionResult = { result: "correct" | "partial" | "wrong" | "skipped"; note: string };
+export const QuizReview = createContext<{ answers: Record<string, string>; results: Record<string, QuestionResult> } | null>(null);
+
 export function Quiz({ spec }: { spec: QuizSpec }) {
+  const review = useContext(QuizReview);
+  if (review) return <Review spec={spec} answer={review.answers[spec.id]} result={review.results[spec.id]} />;
+  return <Live spec={spec} />;
+}
+
+function Review({ spec, answer, result }: { spec: QuizSpec; answer?: string; result?: QuestionResult }) {
+  const status = result?.result ?? (answer ? "pending" : "skipped");
+  return (
+    <div className={`quiz quiz-review is-${status}`}>
+      <p className="quiz-prompt"><Inline>{spec.prompt}</Inline><span className="quiz-status">{status}</span></p>
+      {spec.type === "mcq" ? (
+        <div className="quiz-options">
+          {spec.options?.map((o, i) => (
+            <div key={i} className={`${i === spec.answer ? "is-answer" : ""} ${String(i) === answer && i !== spec.answer ? "is-wrong" : ""}`}>
+              <span className="mark">{String(i) === answer ? "●" : "○"}</span> {o}
+            </div>
+          ))}
+        </div>
+      ) : (
+        <blockquote className="quiz-answer">{answer || <span className="muted">No answer</span>}</blockquote>
+      )}
+      {result?.note && <p className="quiz-explain"><Inline>{result.note}</Inline></p>}
+    </div>
+  );
+}
+
+function Live({ spec }: { spec: QuizSpec }) {
   const form = useContext(QuizForm);
   const [value, setValue] = useState("");
   const [checked, setChecked] = useState(false);

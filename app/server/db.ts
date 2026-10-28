@@ -10,6 +10,10 @@ db.run(`
     id TEXT PRIMARY KEY, course TEXT NOT NULL, quiz TEXT NOT NULL,
     answers TEXT NOT NULL, grade TEXT, created_at TEXT NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS drafts (
+    course TEXT NOT NULL, quiz TEXT NOT NULL, answers TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (course, quiz)
+  );
   CREATE TABLE IF NOT EXISTS jobs (
     id TEXT PRIMARY KEY, course TEXT NOT NULL, kind TEXT NOT NULL, ref TEXT,
     status TEXT NOT NULL, started_at TEXT, finished_at TEXT, session_id TEXT, result TEXT, error TEXT
