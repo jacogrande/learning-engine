@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Phase 0 spike</title>
+<style>
+  body { margin: 0; padding: 40px; max-width: 900px; color: #1a1a1a; background: #fff;
+         font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif; }
+  @media (prefers-color-scheme: dark) { body { color: #e8e8e8; background: #111; } pre { background: #191919 !important; } .stat { border-color: #262626 !important; } }
+  h1 { font-size: 20px; margin: 0 0 16px; }
+  form { display: flex; gap: 8px; margin-bottom: 16px; }
+  input { flex: 1; padding: 8px 10px; font: inherit; border: 1px solid #ccc; border-radius: 6px; background: transparent; color: inherit; }
+  button { padding: 8px 14px; font: inherit; border: 1px solid #ccc; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  .stats { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 16px; font-size: 13px; }
+  .stat { padding: 6px 10px; border: 1px solid #ececec; border-radius: 6px; }
+  .stat b { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: #767676; font-weight: 500; }
+  pre { background: #f6f6f6; border-radius: 6px; padding: 14px; font-size: 12.5px; line-height: 1.5; overflow-x: auto; white-space: pre-wrap; min-height: 200px; }
+  .ok { color: #2a8a3e; } .err { color: #c0392b; }
+</style>
+</head>
+<body>
+<h1>Phase 0 spike — headless Claude Code</h1>
+<form id="f">
+  <input id="prompt" value="/spike-check lean methodology" autofocus>
+  <button id="go">Run</button>
+</form>
+<div class="stats">
+  <div class="stat"><b>Status</b><span id="status">idle</span></div>
+  <div class="stat"><b>Session</b><span id="session">–</span></div>
+  <div class="stat"><b>Model</b><span id="model">–</span></div>
+  <div class="stat"><b>Subagents</b><span id="agents">–</span></div>
+  <div class="stat"><b>Turns</b><span id="turns">–</span></div>
+  <div class="stat"><b>Files written</b><span id="files">–</span></div>
+  <div class="stat"><b>Est. cost</b><span id="cost">–</span></div>
+</div>
+<pre id="log"></pre>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const log = (s, cls) => { const el = document.createElement("span"); if (cls) el.className = cls; el.textContent = s + "\n"; $("log").append(el); window.scrollTo(0, document.body.scrollHeight); };
+
+  $("f").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    $("go").disabled = true; $("log").textContent = ""; $("status").textContent = "running";
+    let files = 0, agents = 0, text = "";
+
+    const res = await fetch("/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: $("prompt").value }) });
+    const reader = res.body.getReader(); const dec = new TextDecoder(); let buf = "";
+    while (true) {
+      const { value, done } = await reader.read(); if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i; while ((i = buf.indexOf("\n\n")) >= 0) {
+        const frame = buf.slice(0, i); buf = buf.slice(i + 2);
+        const ev = /^event: (.*)$/m.exec(frame)?.[1]; const data = JSON.parse(/^data: (.*)$/m.exec(frame)?.[1] ?? "null");
+        handle(ev, data);
+      }
+    }
+
+    function handle(ev, d) {
+      if (ev === "spawn") return log(`$ claude ${d.args.join(" ").slice(0, 160)}…`);
+      if (ev === "stderr") return log(d.trim(), "err");
+      if (ev === "exit") { $("status").textContent = d.code === 0 ? "done" : `exit ${d.code}`; $("go").disabled = false; return log(`\n[exit ${d.code}]`, d.code === 0 ? "ok" : "err"); }
+      if (ev !== "claude") return;
+
+      if (d.type === "system" && d.subtype === "init") { $("session").textContent = d.session_id.slice(0, 8); $("model").textContent = d.model; return log(`[init] model=${d.model} tools=${d.tools?.length} skills=${(d.slash_commands || []).filter(s => s.includes("spike")).join(",") || "?"}`); }
+      if (d.type === "stream_event" && d.event?.delta?.type === "text_delta") { text += d.event.delta.text; return; }
+      if (d.type === "assistant") {
+        for (const c of d.message?.content ?? []) {
+          if (c.type === "text") log(`\n[assistant] ${c.text}`);
+          if (c.type === "tool_use") {
+            if (c.name === "Agent") { agents++; $("agents").textContent = agents; log(`[tool] Agent → ${c.input.subagent_type ?? "?"}: ${(c.input.description || c.input.prompt || "").slice(0, 80)}`); }
+            else if (c.name === "Write") { files++; $("files").textContent = files; log(`[tool] Write ${c.input.file_path}`); }
+            else log(`[tool] ${c.name} ${JSON.stringify(c.input).slice(0, 100)}`);
+          }
+        }
+        return;
+      }
+      if (d.type === "user") { for (const c of d.message?.content ?? []) if (c.type === "tool_result") log(`[result] ${(typeof c.content === "string" ? c.content : JSON.stringify(c.content)).slice(0, 120)}`); return; }
+      if (d.type === "result") {
+        $("turns").textContent = d.num_turns; $("cost").textContent = "$" + (d.total_cost_usd ?? 0).toFixed(3);
+        $("agents").textContent = d.subagent_stats?.spawned ?? agents;
+        return log(`\n[result] ${d.subtype} — ${d.result}`, d.is_error ? "err" : "ok");
+      }
+    }
+  });
+</script>
+</body>
+</html>
