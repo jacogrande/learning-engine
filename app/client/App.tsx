@@ -3,6 +3,7 @@ import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, typ
 import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
+import { Reader } from "./Reader";
 
 // --- tiny router ---------------------------------------------------------
 function usePath() {
@@ -11,13 +12,13 @@ function usePath() {
   return path;
 }
 export function navigate(to: string) { history.pushState(null, "", to); dispatchEvent(new PopStateEvent("popstate")); }
-const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
+export const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
   <a href={to} className={className} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>
 );
 
 export function App() {
   const path = usePath();
-  const m = /^\/c\/([^/]+)(?:\/(baseline)|\/m\/([^/]+)(?:\/([^/]+))?)?/.exec(path);
+  const m = /^\/c\/([^/]+)(?:\/(baseline)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
   return (
     <>
       {!m ? <Courses /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />}
@@ -29,7 +30,7 @@ export function App() {
 // --- shell: top bar with breadcrumbs, theme ------------------------------
 type Crumb = { label: string; to?: string };
 
-function Shell({ crumbs, children, className }: { crumbs: Crumb[]; children: ReactNode; className?: string }) {
+export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; children: ReactNode; className?: string }) {
   return (
     <>
       <header className="top">
@@ -221,52 +222,5 @@ function Analysis({ grade }: { grade: Grade }) {
         <div><h4>Missing</h4><ul>{grade.gaps.map((s, i) => <li key={i}>{s}</li>)}</ul></div>
       </div>
     </div>
-  );
-}
-
-// --- /c/:slug/m/:id/:file ------------------------------------------------
-function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file?: string }) {
-  const { data: course } = useLive<Course>(`/api/courses/${slug}`);
-  const mod = course?.modules.find((m) => m.id === moduleId);
-  const current = file ?? mod?.sections[0]?.file;
-  const { data: doc } = useLive<Doc>(mod && current ? `/api/courses/${slug}/doc?path=modules/${moduleId}/${current}` : null);
-  useEffect(() => { window.scrollTo(0, 0); }, [current]);
-  if (!course || !mod) return null;
-
-  const i = mod.sections.findIndex((s) => s.file === current);
-  const prev = mod.sections[i - 1], next = mod.sections[i + 1];
-  const n = course.modules.findIndex((m) => m.id === moduleId);
-  return (
-    <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title, to: `/c/${slug}` }, { label: mod.title }]} className="reader">
-      <nav className="side">
-        <div className="side-title">{mod.title}</div>
-        <ul>
-          {mod.sections.map((s) => (
-            <li key={s.file}><Link to={`/c/${slug}/m/${moduleId}/${s.file}`} className={s.file === current ? "active" : ""}>{s.title}</Link></li>
-          ))}
-        </ul>
-        <div className="side-title muted">Modules</div>
-        <ol className="side-modules">
-          {course.modules.map((m) => (
-            <li key={m.id}>
-              {m.status === "ready" ? <Link to={`/c/${slug}/m/${m.id}`} className={m.id === moduleId ? "active" : ""}>{m.title}</Link> : <span className="muted dim">{m.title}</span>}
-            </li>
-          ))}
-        </ol>
-      </nav>
-      <main className="content">
-        {doc && (
-          <article>
-            <p className="kicker">Module {String(n + 1).padStart(2, "0")} · {i + 1} of {mod.sections.length}</p>
-            <h1>{doc.frontmatter.title ?? mod.sections[i]?.title}</h1>
-            <Markdown body={doc.body} />
-            <footer className="article-foot">
-              {prev ? <Link to={`/c/${slug}/m/${moduleId}/${prev.file}`} className="btn">← {prev.title}</Link> : <span />}
-              {next ? <Link to={`/c/${slug}/m/${moduleId}/${next.file}`} className="btn">{next.title} →</Link> : <Link to={`/c/${slug}`} className="btn">Back to outline →</Link>}
-            </footer>
-          </article>
-        )}
-      </main>
-    </Shell>
   );
 }

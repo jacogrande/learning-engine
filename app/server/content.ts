@@ -11,7 +11,15 @@ export type Doc = { frontmatter: Record<string, any>; body: string };
 export function parseDoc(src: string): Doc {
   const m = /^---\n([\s\S]*?)\n---\n?/.exec(src);
   if (!m) return { frontmatter: {}, body: src };
-  return { frontmatter: YAML.parse(m[1]) ?? {}, body: src.slice(m[0].length) };
+  let frontmatter: Record<string, any>;
+  try { frontmatter = YAML.parse(m[1]) ?? {}; }
+  catch {
+    // Claude occasionally writes an unquoted value containing ": ". Fall back to a line-wise
+    // read of the scalar keys so one bad file never takes a course down.
+    frontmatter = {};
+    for (const line of m[1].split("\n")) { const k = /^(\w[\w-]*):\s*(.*)$/.exec(line); if (k) frontmatter[k[1]] = k[2].replace(/^["']|["']$/g, ""); }
+  }
+  return { frontmatter, body: src.slice(m[0].length) };
 }
 
 async function exists(p: string) { return stat(p).then(() => true, () => false); }
@@ -25,9 +33,11 @@ async function mdFiles(dir: string): Promise<string[]> {
 }
 
 export type Section = { file: string; title: string };
+// Drill-downs and reading lists generated from a selection; `section` is the file they came from.
+export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
 export type Module = {
   id: string; title: string; summary?: string; objectives?: string[];
-  status: "planned" | "ready"; sections: Section[];
+  status: "planned" | "ready"; sections: Section[]; extras: Extra[];
 };
 export type Course = {
   slug: string; title: string; depth?: string; description: string;
@@ -59,7 +69,13 @@ export async function getCourse(slug: string): Promise<Course | null> {
       const d = await readDoc(join(dir, "modules", m.id, file));
       sections.push({ file, title: d?.frontmatter.title ?? basename(file, ".md") });
     }
-    modules.push({ ...m, status: sections.length ? "ready" : "planned", sections });
+    const extras: Extra[] = [];
+    for (const [sub, kind] of [["drilldowns", "drilldown"], ["readings", "reading"]] as const)
+      for (const file of await mdFiles(join(dir, "modules", m.id, sub))) {
+        const d = await readDoc(join(dir, "modules", m.id, sub, file));
+        extras.push({ file: `${sub}/${file}`, kind, title: d?.frontmatter.title ?? basename(file, ".md"), section: d?.frontmatter.section });
+      }
+    modules.push({ ...m, status: sections.length ? "ready" : "planned", sections, extras });
   }
 
   return { slug, title: course.frontmatter.title ?? slug, depth: course.frontmatter.depth, description: course.body.trim(), stage, modules };

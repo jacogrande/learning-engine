@@ -21,7 +21,7 @@ The skeleton: Vite + React client, Hono server, Drizzle schema, chokidar indexer
 
 **Done when:** you run `/start-course`, take the baseline, get an outline, generate a module, and read it in the browser as sections land.
 
-### Phase 2 — Interact *(1–2 weeks)*
+### Phase 2 — Interact *(1–2 weeks)* — done, see [phase-2-results.md](phase-2-results.md)
 Everything you do while reading. Grading with structured feedback appended into the doc. Selection menu with Add to Note, Drill Down, Find Additional Reading, and Chat. Durable highlights that re-anchor after regeneration. Tiptap notes pane. Chat pane with multi-turn sessions. Git auto-commit per run.
 
 **Done when:** you can highlight a sentence, drill into it, ask Claude about it, and keep notes — and all of it survives a module regeneration.

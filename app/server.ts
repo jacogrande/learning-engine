@@ -1,12 +1,16 @@
 // `bun run dev` — serves the client (bundled by Bun) and the API.
 import index from "./client/index.html";
-import { listCourses, getCourse, getDoc } from "./server/content";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import { ROOT, listCourses, getCourse, getDoc } from "./server/content";
 import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
-import { sse, watchContent } from "./server/events";
+import { sse, watchContent, broadcast } from "./server/events";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
+const q = (req: Request, key: string) => new URL(req.url).searchParams.get(key) ?? "";
 
+const RESULT = { type: "string", enum: ["correct", "partial", "wrong", "skipped"] };
 const ASSESSMENT_SCHEMA = {
   type: "object",
   properties: {
@@ -14,21 +18,11 @@ const ASSESSMENT_SCHEMA = {
     summary: { type: "string" },
     strengths: { type: "array", items: { type: "string" } },
     gaps: { type: "array", items: { type: "string" } },
-    questions: {
-      type: "array",
-      items: {
-        type: "object",
-        properties: {
-          id: { type: "string" },
-          result: { type: "string", enum: ["correct", "partial", "wrong", "skipped"] },
-          note: { type: "string" },
-        },
-        required: ["id", "result", "note"],
-      },
-    },
+    questions: { type: "array", items: { type: "object", properties: { id: { type: "string" }, result: RESULT, note: { type: "string" } }, required: ["id", "result", "note"] } },
   },
   required: ["level", "summary", "strengths", "gaps", "questions"],
 };
+const GRADE_SCHEMA = { type: "object", properties: { result: RESULT, note: { type: "string" } }, required: ["result", "note"] };
 
 // Latest attempt for a quiz, plus any unsent draft.
 async function quizState(course: string, quiz: string) {
@@ -57,6 +51,35 @@ function assess(slug: string, attempt: { id: string; answers: unknown }) {
   });
 }
 
+const notesPath = (slug: string, mod: string) => join(ROOT, "data/notes", slug, `${mod}.md`);
+const quoteBlock = (s: string) => s.split("\n").map((l) => `> ${l}`).join("\n");
+
+// One chat turn: the first uses the /chat skill with context; later turns resume the session.
+function sendChat(chat: any, content: string) {
+  const mid = id();
+  db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [mid, chat.id, "user", content, now()]);
+  const prompt = chat.session_id
+    ? content
+    : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `Selected passage:\n${quoteBlock(chat.context)}\n\n` : ""}Learner: ${content}`;
+  let text = "";
+  enqueue(chat.course, "chat", prompt, {
+    ref: chat.id, resume: chat.session_id ?? undefined,
+    stream: (delta) => { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); },
+    then: (result, job) => {
+      const reply = typeof result === "string" && result.trim() ? result : text;
+      const aid = id();
+      db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [aid, chat.id, "assistant", reply, now()]);
+      db.run("UPDATE chats SET session_id=COALESCE(session_id, ?), updated_at=? WHERE id=?", [job.sessionId ?? null, now(), chat.id]);
+      broadcast({ type: "chat", chat: chat.id, done: true, message: { id: aid, role: "assistant", content: reply } });
+    },
+  });
+  return { id: mid, role: "user", content };
+}
+const chatWithMessages = (cid: string) => ({
+  chat: db.query("SELECT id, course, doc, context, title, created_at createdAt FROM chats WHERE id=?").get(cid),
+  messages: db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(cid),
+});
+
 watchContent();
 
 Bun.serve({
@@ -70,13 +93,11 @@ Bun.serve({
       return c ? json(c) : json({ error: "not found" }, 404);
     },
     "/api/courses/:slug/doc": async (req) => {
-      const path = new URL(req.url).searchParams.get("path") ?? "";
-      const d = await getDoc(req.params.slug, path);
+      const d = await getDoc(req.params.slug, q(req, "path"));
       return d ? json(d) : json({ error: "not found" }, 404);
     },
 
-    // Answers are saved as a draft while typing, as an attempt on submit (before Claude
-    // sees them), and the grade is attached when assessment finishes.
+    // --- baseline -------------------------------------------------------
     "/api/courses/:slug/quiz/:quiz": async (req) => json(await quizState(req.params.slug, req.params.quiz)),
     "/api/courses/:slug/quiz/:quiz/draft": {
       PUT: async (req) => {
@@ -91,14 +112,12 @@ Bun.serve({
         const slug = req.params.slug;
         const { answers } = (await req.json()) as { answers: Record<string, string> };
         const attempt = { id: id(), answers };
-        db.run("INSERT INTO attempts (id, course, quiz, answers, created_at) VALUES (?,?,?,?,?)",
-          [attempt.id, slug, "baseline", JSON.stringify(answers), now()]);
+        db.run("INSERT INTO attempts (id, course, quiz, answers, created_at) VALUES (?,?,?,?,?)", [attempt.id, slug, "baseline", JSON.stringify(answers), now()]);
         db.run("DELETE FROM drafts WHERE course=? AND quiz=?", [slug, "baseline"]);
         assess(slug, attempt);
         return json({ attempt: attempt.id });
       },
     },
-    // Re-run assessment on the saved attempt (after a failed or cancelled job).
     "/api/courses/:slug/baseline/assess": {
       POST: async (req) => {
         const { attempt } = await quizState(req.params.slug, "baseline");
@@ -108,6 +127,89 @@ Bun.serve({
     "/api/courses/:slug/outline": { POST: (req) => json(enqueue(req.params.slug, "outline", `/generate-outline ${req.params.slug}`)) },
     "/api/courses/:slug/modules/:id/generate": {
       POST: (req) => json(enqueue(req.params.slug, "module", `/generate-module ${req.params.slug} ${req.params.id}`, { ref: req.params.id })),
+    },
+
+    // --- in-lesson answers ---------------------------------------------
+    "/api/courses/:slug/answers": {
+      GET: (req) => json(db.query("SELECT question, answer, result, note, job, graded_at gradedAt FROM answers WHERE course=? AND doc=?").all(req.params.slug, q(req, "doc"))),
+      POST: async (req) => {
+        const slug = req.params.slug;
+        const { question, doc, answer, type, result } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string };
+        let job: string | null = null;
+        if (type === "short") {
+          job = enqueue(slug, "grade", `/grade ${slug} ${doc} ${question}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
+            ref: question, schema: GRADE_SCHEMA,
+            then: (g: any) => {
+              db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=?", [g.result, g.note, now(), slug, question]);
+              broadcast({ type: "answer", course: slug, doc, question });
+            },
+          }).id;
+        }
+        db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(course, question) DO UPDATE SET answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
+          [slug, question, doc, answer, type === "mcq" ? result ?? null : null, null, job, now(), type === "mcq" ? now() : null]);
+        return json({ ok: true, job });
+      },
+    },
+
+    // --- highlights -----------------------------------------------------
+    "/api/courses/:slug/annotations": {
+      GET: (req) => json(db.query("SELECT id, doc, quote, prefix, suffix, created_at createdAt FROM annotations WHERE course=? AND doc=? ORDER BY created_at").all(req.params.slug, q(req, "doc"))),
+      POST: async (req) => {
+        const { doc, quote, prefix, suffix } = (await req.json()) as { doc: string; quote: string; prefix?: string; suffix?: string };
+        const row = { id: id(), doc, quote, prefix: prefix ?? "", suffix: suffix ?? "", createdAt: now() };
+        db.run("INSERT INTO annotations (id, course, doc, quote, prefix, suffix, created_at) VALUES (?,?,?,?,?,?,?)", [row.id, req.params.slug, doc, quote, row.prefix, row.suffix, row.createdAt]);
+        return json(row);
+      },
+    },
+    "/api/annotations/:id": { DELETE: (req) => { db.run("DELETE FROM annotations WHERE id=?", [req.params.id]); return json({ ok: true }); } },
+
+    // --- notes: one markdown file per module, readable by Claude --------
+    "/api/courses/:slug/notes/:module": {
+      GET: async (req) => json({ markdown: await readFile(notesPath(req.params.slug, req.params.module), "utf8").catch(() => "") }),
+      PUT: async (req) => {
+        const { markdown } = (await req.json()) as { markdown: string };
+        const p = notesPath(req.params.slug, req.params.module);
+        await mkdir(join(p, ".."), { recursive: true });
+        await writeFile(p, markdown);
+        return json({ ok: true });
+      },
+    },
+
+    // --- chat -------------------------------------------------------------
+    "/api/courses/:slug/chats": {
+      GET: (req) => json(db.query("SELECT id, doc, context, title, created_at createdAt FROM chats WHERE course=? AND doc=? ORDER BY updated_at DESC").all(req.params.slug, q(req, "doc"))),
+      POST: async (req) => {
+        const { doc, context, message } = (await req.json()) as { doc: string; context?: string; message: string };
+        const chat = { id: id(), course: req.params.slug, doc, context: context ?? null, title: (context ?? message).slice(0, 60), session_id: null };
+        db.run("INSERT INTO chats (id, course, doc, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", [chat.id, chat.course, doc, chat.context, chat.title, null, now(), now()]);
+        sendChat(chat, message);
+        return json(chatWithMessages(chat.id));
+      },
+    },
+    "/api/chats/:id": (req) => json(chatWithMessages(req.params.id)),
+    "/api/chats/:id/messages": {
+      POST: async (req) => {
+        const chat = db.query("SELECT * FROM chats WHERE id=?").get(req.params.id) as any;
+        if (!chat) return json({ error: "not found" }, 404);
+        const { content } = (await req.json()) as { content: string };
+        return json(sendChat(chat, content));
+      },
+    },
+
+    // --- selection-driven generation -----------------------------------
+    "/api/courses/:slug/drilldown": {
+      POST: async (req) => {
+        const { doc, quote, guidance } = (await req.json()) as { doc: string; quote: string; guidance?: string };
+        const prompt = `/drill-down ${req.params.slug} ${doc}\n\nSelected passage:\n${quoteBlock(quote)}${guidance ? `\n\nLearner's guidance: ${guidance}` : ""}`;
+        return json(enqueue(req.params.slug, "drilldown", prompt, { ref: doc }));
+      },
+    },
+    "/api/courses/:slug/reading": {
+      POST: async (req) => {
+        const { doc, quote } = (await req.json()) as { doc: string; quote: string };
+        return json(enqueue(req.params.slug, "reading", `/find-reading ${req.params.slug} ${doc}\n\nSelected passage:\n${quoteBlock(quote)}`, { ref: doc }));
+      },
     },
 
     "/api/jobs": () => json(jobs()),

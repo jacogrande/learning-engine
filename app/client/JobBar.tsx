@@ -2,13 +2,18 @@
 import { useEffect, useState } from "react";
 import { get, post, useJobs, type Job } from "./api";
 
-const label = (j: Job) => ({ assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}` }[j.kind]);
+const label = (j: Job) => ({
+  assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
+  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying",
+}[j.kind]);
 
 export function JobBar() {
   const jobs = useJobs();
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState<string[]>([]);
-  const job = jobs.find((j) => j.status === "running") ?? jobs[0];
+  // Chat and grading show their progress in place; the bar is for the long jobs.
+  const shown = jobs.filter((j) => !["chat", "grade"].includes(j.kind));
+  const job = shown.find((j) => j.status === "running") ?? shown[0];
   const [, tick] = useState(0);
 
   useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 1000); return () => clearInterval(t); }, []);
@@ -26,7 +31,7 @@ export function JobBar() {
     <div className={`jobbar ${open ? "open" : ""}`}>
       <div className="jobbar-row" onClick={() => setOpen(!open)}>
         <span className="pulse" />
-        <span>{label(job)}{jobs.length > 1 ? ` · ${jobs.length - 1} queued` : ""}</span>
+        <span>{label(job)}{shown.length > 1 ? ` · ${shown.length - 1} queued` : ""}</span>
         <span className="muted">{job.status === "running" ? `${job.activity ?? ""} · ${elapsed}` : job.status}</span>
         <button className="link" onClick={(e) => { e.stopPropagation(); post(`/api/jobs/${job.id}/cancel`); }}>cancel</button>
       </div>

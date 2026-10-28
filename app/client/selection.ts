@@ -1,0 +1,59 @@
+// Text anchoring without a library. A selection is described by its exact text plus a little
+// context on either side (W3C TextQuoteSelector); it is found again by searching the rendered
+// text and painted with the CSS Custom Highlight API, which never touches React's DOM.
+
+export type Quote = { quote: string; prefix: string; suffix: string };
+
+// Flatten a container's text nodes so character offsets map back to DOM positions.
+function textMap(root: Node) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes: { node: Text; start: number }[] = [];
+  let text = "";
+  while (walker.nextNode()) { const n = walker.currentNode as Text; nodes.push({ node: n, start: text.length }); text += n.data; }
+  const at = (off: number): [Text, number] => {
+    for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i].start <= off) return [nodes[i].node, off - nodes[i].start];
+    return [nodes[0]?.node, 0];
+  };
+  return { text, at };
+}
+
+const CTX = 32;
+
+// Describe the current selection relative to `root`, or null if it is not inside it.
+export function describe(root: HTMLElement): (Quote & { rect: DOMRect }) | null {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  if (!root.contains(range.commonAncestorContainer)) return null;
+  const quote = range.toString();
+  if (!quote.trim()) return null;
+  const { text } = textMap(root);
+  const pre = document.createRange();
+  pre.selectNodeContents(root);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length;
+  return { quote, prefix: text.slice(Math.max(0, start - CTX), start), suffix: text.slice(start + quote.length, start + quote.length + CTX), rect: range.getBoundingClientRect() };
+}
+
+// Find a quote again. Exact match first; among several, the one whose context agrees best.
+export function locate(root: HTMLElement, q: Quote): Range | null {
+  const { text, at } = textMap(root);
+  let i = -1, best = -1, bestScore = -1;
+  while ((i = text.indexOf(q.quote, i + 1)) >= 0) {
+    const score = (q.prefix && text.slice(Math.max(0, i - q.prefix.length), i).endsWith(q.prefix.slice(-12)) ? 1 : 0)
+                + (q.suffix && text.slice(i + q.quote.length).startsWith(q.suffix.slice(0, 12)) ? 1 : 0);
+    if (score > bestScore) { best = i; bestScore = score; }
+  }
+  if (best < 0) return null;
+  const range = document.createRange();
+  range.setStart(...at(best));
+  range.setEnd(...at(best + q.quote.length));
+  return range;
+}
+
+export function paint(root: HTMLElement, quotes: Quote[]) {
+  const H = (globalThis as any).Highlight;
+  if (!H || !CSS.highlights) return;
+  const ranges = quotes.map((q) => locate(root, q)).filter((r): r is Range => !!r);
+  CSS.highlights.set("notes", new H(...ranges));
+}

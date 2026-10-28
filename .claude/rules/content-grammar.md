@@ -4,7 +4,7 @@ Every file you write under `content/courses/` is Markdown that the app renders. 
 
 ## Frontmatter
 
-Every file starts with YAML frontmatter. Required: `title`. Section files also need `order`.
+Every file starts with YAML frontmatter. Required: `title`. Section files also need `order`. Any value that contains `: ` or starts with a quote goes in double quotes.
 
 ```markdown
 ---

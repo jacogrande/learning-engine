@@ -1,21 +1,22 @@
-// A single question. In "form" mode (baseline) answers are collected by a parent; otherwise it self-checks.
+// A single question. Three modes: form (baseline; a parent collects answers), review (read-only
+// with the grader's note), and live (in a lesson; answers persist and short ones are graded).
 import { createContext, useContext, useState } from "react";
 import ReactMarkdown from "react-markdown";
-
-const Inline = ({ children }: { children: string }) => (
-  <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{children}</ReactMarkdown>
-);
+import type { Answer, Result } from "./api";
 
 export type QuizSpec = {
   id: string; type: "mcq" | "short"; prompt: string;
   options?: string[]; answer?: number; explanation?: string; rubric?: string;
 };
 
-export const QuizForm = createContext<{ answers: Record<string, string>; set: (id: string, v: string) => void } | null>(null);
+const Inline = ({ children }: { children: string }) => (
+  <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{children}</ReactMarkdown>
+);
 
-// Read-only: the learner's saved answer plus the grader's note.
-export type QuestionResult = { result: "correct" | "partial" | "wrong" | "skipped"; note: string };
+export const QuizForm = createContext<{ answers: Record<string, string>; set: (id: string, v: string) => void } | null>(null);
+export type QuestionResult = { result: Result; note: string };
 export const QuizReview = createContext<{ answers: Record<string, string>; results: Record<string, QuestionResult> } | null>(null);
+export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string) => void } | null>(null);
 
 export function Quiz({ spec }: { spec: QuizSpec }) {
   const review = useContext(QuizReview);
@@ -46,16 +47,22 @@ function Review({ spec, answer, result }: { spec: QuizSpec; answer?: string; res
 
 function Live({ spec }: { spec: QuizSpec }) {
   const form = useContext(QuizForm);
-  const [value, setValue] = useState("");
-  const [checked, setChecked] = useState(false);
+  const grade = useContext(QuizGrade);
+  const saved = grade?.saved[spec.id];
+  const [value, setValue] = useState(saved?.answer ?? "");
+  const [checked, setChecked] = useState(!!saved);
   const v = form ? form.answers[spec.id] ?? "" : value;
   const set = (x: string) => { form ? form.set(spec.id, x) : setValue(x); setChecked(false); };
 
   const correct = spec.type === "mcq" && spec.answer != null && v === String(spec.answer);
+  const grading = checked && spec.type === "short" && grade && saved?.answer === v && !saved?.note;
+  const status: Result | null = checked ? (spec.type === "mcq" ? (correct ? "correct" : "wrong") : saved?.answer === v ? saved?.result ?? null : null) : null;
+
+  const check = () => { setChecked(true); grade?.submit(spec, v); };
 
   return (
-    <div className="quiz">
-      <p className="quiz-prompt"><Inline>{spec.prompt}</Inline></p>
+    <div className={`quiz ${status ? `is-${status}` : ""}`}>
+      <p className="quiz-prompt"><Inline>{spec.prompt}</Inline>{status && <span className="quiz-status">{status}</span>}</p>
       {spec.type === "mcq" ? (
         <div className="quiz-options">
           {spec.options?.map((o, i) => (
@@ -69,12 +76,14 @@ function Live({ spec }: { spec: QuizSpec }) {
       )}
       {!form && (
         <div className="quiz-actions">
-          <button onClick={() => setChecked(true)} disabled={!v}>Check</button>
-          {checked && spec.type === "mcq" && <span className={correct ? "ok" : "muted"}>{correct ? "Correct" : "Not quite"}</span>}
+          <button onClick={check} disabled={!v || checked}>{grading ? "Grading…" : "Check"}</button>
+          {spec.type === "short" && grade && !checked && saved && <span className="muted">Edited since last check</span>}
         </div>
       )}
-      {checked && !form && (spec.explanation || spec.rubric) && (
-        <p className="quiz-explain"><Inline>{spec.explanation ?? spec.rubric ?? ""}</Inline></p>
+      {checked && !form && spec.type === "mcq" && spec.explanation && <p className="quiz-explain"><Inline>{spec.explanation}</Inline></p>}
+      {checked && !form && spec.type === "short" && (
+        grade ? (saved?.note && saved.answer === v ? <p className="quiz-explain"><Inline>{saved.note}</Inline></p> : null)
+              : spec.rubric ? <p className="quiz-explain"><Inline>{spec.rubric}</Inline></p> : null
       )}
     </div>
   );
