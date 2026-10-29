@@ -32,6 +32,18 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const [ask, setAsk] = useState<Quote | null>(null);          // drill-down guidance prompt
   const [chatDraft, setChatDraft] = useState<string | null>(null);
   const [drawer, setDrawer] = useState<"nav" | "pane" | null>(null);   // narrow screens: which column is open as a drawer
+  // Pane width: drag its left edge; remembered per browser.
+  const [paneW, setPaneW] = useState<number | null>(() => { try { return Number(localStorage.getItem("paneWidth")) || null; } catch { return null; } });
+  const [resizing, setResizing] = useState(false);
+  const startResize = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    const pane = (e.currentTarget.parentElement as HTMLElement), startX = e.clientX, startW = pane.offsetWidth;
+    setResizing(true);
+    const move = (ev: PointerEvent) => setPaneW(Math.min(760, Math.max(320, startW + (startX - ev.clientX))));
+    const up = () => { setResizing(false); removeEventListener("pointermove", move); removeEventListener("pointerup", up); };
+    addEventListener("pointermove", move); addEventListener("pointerup", up);
+  };
+  useEffect(() => { if (paneW) try { localStorage.setItem("paneWidth", String(paneW)); } catch {} }, [paneW]);
 
   useEffect(() => { window.scrollTo(0, 0); setSel(null); setDrawer(null); }, [current]);
   useEffect(() => {
@@ -176,7 +188,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
       </main>
 
       <div className="scrim" onClick={() => setDrawer(null)} />
-      <aside className="pane">
+      <aside className={`pane ${resizing ? "is-resizing" : ""}`} style={paneW ? { width: paneW } : undefined}>
+        <div className="pane-resizer" onPointerDown={startResize} title="Drag to resize" />
         <div className="pane-tabs">
           <button aria-pressed={pane === "notes"} onClick={() => setPane("notes")}>Notes</button>
           <button aria-pressed={pane === "chat"} onClick={() => setPane("chat")}>Chat</button>
