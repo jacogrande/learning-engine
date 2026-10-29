@@ -10,7 +10,7 @@ Subject: $ARGUMENTS
 
 ## 1. Clarify
 
-Ask the learner, in one round: target depth (entry level / working practitioner / expert), what they already know or have done, what they want to be able to *do* afterward, and what they are producing with it right now (the documents, code, decisions, or work the course should draw examples from). Skip questions the subject line already answers.
+Ask the learner, in one round: target depth (entry level / working practitioner / expert), what they already know or have done, what they want to be able to *do* afterward, and what they are producing with it right now (the documents, code, decisions, or work the course should draw examples from). Skip questions the subject line already answers. If the message already carries the answers (the app sends them), ask nothing and proceed.
 
 Pick a short kebab-case slug. Stop and ask if `library/content/courses/<slug>/` already exists.
 
@@ -57,4 +57,4 @@ Write `library/content/courses/<slug>/quizzes/baseline.md`, frontmatter `title: 
 
 ## 5. Finish
 
-Tell the learner the course is at `http://localhost:4000/c/<slug>` and that the baseline is the only thing there until they take it.
+Reply with one line: the slug, and that the baseline is the only thing there until they take it.

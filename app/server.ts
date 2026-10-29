@@ -161,7 +161,20 @@ Bun.serve({
   development: { hmr: true, console: false },
   routes: {
     "/api/events": (req) => sse(req),
-    "/api/courses": async () => json(await listCourses()),
+    "/api/courses": {
+      GET: async () => json(await listCourses()),
+      // New course from the app: the clarifying answers come with the request, so the skill skips its questions.
+      POST: async (req) => {
+        const b = (await req.json()) as { subject: string; depth?: string; know?: string; goals?: string; produce?: string; angle?: string };
+        if (!b.subject?.trim()) return json({ error: "subject required" }, 400);
+        const answers = [
+          ["Target depth", b.depth], ["What they already know or have done", b.know], ["What they want to be able to do afterward", b.goals],
+          ["What they are producing with it right now", b.produce], ["Angle to emphasize or avoid", b.angle],
+        ].filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v!.trim()}`).join("\n");
+        const prompt = `/start-course ${b.subject.trim()}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given; choose sensible defaults for a working practitioner)"}`;
+        return json(enqueue("new", "start", prompt, { ref: b.subject.trim().slice(0, 60) }));
+      },
+    },
     "/api/courses/:slug": async (req) => {
       const c = await getCourse(req.params.slug);
       return c ? json(c) : json({ error: "not found" }, 404);

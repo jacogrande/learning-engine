@@ -81,13 +81,18 @@ function Theme() {
 // --- / -------------------------------------------------------------------
 function Courses() {
   const { data } = useLive<Course[]>("/api/courses");
+  const jobs = useJobs();
+  const starting = jobs.filter((j) => j.kind === "start");
+  const [open, setOpen] = useState(false);
   const status = (c: Course) =>
     c.stage === "baseline" ? "Baseline waiting" : c.stage === "assessed" ? "Outline pending" : `${c.modules.filter((m) => m.status === "ready").length} of ${c.modules.length} modules generated`;
   return (
     <Shell crumbs={[{ label: "Courses" }]} className="page">
-      <h1>Courses</h1>
-      {data?.length === 0 && (
-        <p className="muted">No courses yet. In a terminal, run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
+      <div className="page-head"><h1>Courses</h1>{!open && <button className="primary" onClick={() => setOpen(true)}>New course</button>}</div>
+      {open && <NewCourse onDone={() => setOpen(false)} />}
+      {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — researching the subject and writing the baseline. It appears below when ready ({j.activity ?? "queued"}).</p>)}
+      {data?.length === 0 && starting.length === 0 && !open && (
+        <p className="muted">No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
       )}
       <ul className="cards">
         {data?.map((c) => (
@@ -100,6 +105,34 @@ function Courses() {
         ))}
       </ul>
     </Shell>
+  );
+}
+
+// The clarifying questions /start-course would ask in a terminal, asked here instead.
+function NewCourse({ onDone }: { onDone: () => void }) {
+  const [f, setF] = useState({ subject: "", depth: "practitioner", know: "", goals: "", produce: "", angle: "" });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  const [busy, setBusy] = useState(false);
+  return (
+    <form className="new-course" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await post("/api/courses", f); onDone(); }}>
+      <label>Subject<input autoFocus required value={f.subject} onChange={set("subject")} placeholder="e.g. lean methodology in business" /></label>
+      <label>Depth
+        <select value={f.depth} onChange={set("depth")}>
+          <option value="entry">Entry level — start from the basics</option>
+          <option value="practitioner">Working practitioner — I use this; make me better at it</option>
+          <option value="expert">Expert — theory, debates, the edges</option>
+        </select>
+      </label>
+      <label>What do you already know or have done?<textarea rows={2} value={f.know} onChange={set("know")} /></label>
+      <label>What do you want to be able to do afterward?<textarea rows={2} value={f.goals} onChange={set("goals")} /></label>
+      <label>What are you producing with it right now? <span className="muted">(examples come from here)</span><textarea rows={2} value={f.produce} onChange={set("produce")} placeholder="e.g. weekly status emails, product specs, short fiction" /></label>
+      <label>Anything to emphasize or avoid? <span className="muted">(optional)</span><input value={f.angle} onChange={set("angle")} /></label>
+      <div className="actions">
+        <button type="submit" className="primary" disabled={busy || !f.subject.trim()}>{busy ? "Starting…" : "Start course"}</button>
+        <button type="button" onClick={onDone}>Cancel</button>
+        <span className="muted">Research and the baseline take about five minutes.</span>
+      </div>
+    </form>
   );
 }
 

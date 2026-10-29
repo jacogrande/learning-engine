@@ -424,3 +424,13 @@ article img, .mermaid svg { max-width: 100%; }
   .composer textarea { font-size: var(--fs-body); }
   .selmenu button { min-height: var(--control-h-touch); padding: 0 var(--s-3); }
 }
+
+/* new course form */
+.page-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-4); margin-bottom: var(--s-5); }
+.page-head h1 { margin: 0; }
+.new-course { display: flex; flex-direction: column; gap: var(--s-4); padding: var(--s-5); margin: 0 0 var(--s-6); border: var(--hairline) solid var(--faint); border-radius: var(--radius-3); }
+.new-course label { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; }
+.new-course label .muted { font-weight: 400; }
+.new-course input, .new-course textarea, .new-course select { font: inherit; font-weight: 400; font-size: var(--fs-body); padding: var(--s-2) var(--s-3); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; resize: vertical; }
+.new-course .actions { margin-top: var(--s-1); }
+.starting { padding: var(--s-3) var(--s-4); background: var(--code); border-radius: var(--radius-2); }
