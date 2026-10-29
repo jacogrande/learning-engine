@@ -4,7 +4,7 @@ Date: 2026-10-29. Goal from [roadmap.md](roadmap.md): answer a quiz on one machi
 
 ## Verdict: done
 
-Tested with two app instances, each with its own clone of the library, syncing through `github.com/jacogrande/learning-library` (private):
+Tested with two app instances, each with its own clone, syncing through GitHub. (The test ran against a separate library repo; the library was then folded into the app repo at `github.com/jacogrande/learning`, with sync path-limited to `library/`, and re-verified.)
 
 | Step | Result |
 |---|---|
@@ -19,7 +19,7 @@ Tested with two app instances, each with its own clone of the library, syncing t
 ## What changed
 
 ```
-library/                     the user's data, its own git repo (LEARNING_DIR to relocate)
+library/                     the user's data, inside this repo (LEARNING_DIR to relocate)
   content/courses/           was ./content
   notes/                     was ./data/notes
   state/{answers,annotations,chats,attempts}/*.json   new: one file per record
@@ -35,7 +35,8 @@ app/server.ts                state writes on every mutation; /api/sync; chat res
 
 ## How it behaves
 
-- **Start:** `git pull --rebase --autostash`, then rebuild SQLite from `state/`. A conflict aborts the rebase and shows "sync error" in the top bar; resolve it in `library/` like any repo.
+- **Start:** `git pull --rebase --autostash`, then rebuild SQLite from `state/`. A conflict aborts the rebase and shows "sync error" in the top bar; resolve it like any repo. Pulling also brings in app updates.
+- **Only `library/` is staged** by sync commits; app code you are editing stays uncommitted until you commit it yourself.
 - **After a generation job:** commit + push immediately.
 - **After you act:** the record's file is written at once; a commit + push follows after 60 s of quiet, on the next generation, on click, or on shutdown (bounded to 8 s).
 - **Chat on a machine without the session:** `--resume` fails, the server clears the handle and starts a fresh session with the stored transcript replayed in the first prompt.
@@ -43,12 +44,8 @@ app/server.ts                state writes on every mutation; /api/sync; chat res
 ## Setting up another machine
 
 ```
-git clone <app repo> learning && cd learning && bun install
-git clone git@github.com:jacogrande/learning-library.git library
-bun run dev
+git clone git@github.com:jacogrande/learning.git && cd learning && bun install && bun run dev
 ```
-
-Or clone the library anywhere and set `LEARNING_DIR=/path/to/library`.
 
 ## Known limits
 

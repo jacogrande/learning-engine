@@ -32,7 +32,7 @@ The pedagogy loop. End-of-module "teach it to a colleague" summary, Socratic cha
 **Done when:** finishing a module produces an understanding summary that the next module visibly builds on.
 
 ### Phase 4 — Sync across devices *(a few days)* — done, see [phase-4-results.md](phase-4-results.md)
-Every device that runs this already has git and Claude Code, so the repo is the sync layer — no cloud database. Three changes: split the app repo from a private *library* repo (`content/`, `data/notes/`, `data/state/`, pointed at by `LEARNING_DIR`); make user state files-first (one JSON per answer, highlight, chat) with SQLite as a rebuildable index; pull on start, push after each auto-commit, commit state on a debounce and on shutdown. Chats that can't `--resume` on another machine restart from the stored transcript. Design note: [multi-device.md](multi-device.md).
+Every device that runs this already has git and Claude Code, so the repo is the sync layer — no cloud database. Three changes: keep the user's data under `library/` in this repo and have sync stage only that path; make user state files-first (one JSON per answer, highlight, chat) with SQLite as a rebuildable index; pull on start, push after each auto-commit, commit state on a debounce and on shutdown. Chats that can't `--resume` on another machine restart from the stored transcript. Design note: [multi-device.md](multi-device.md).
 
 **Done when:** you answer a quiz on one machine, open the app on another, and the answer, note, and chat are there — with nothing running anywhere but the two laptops.
 

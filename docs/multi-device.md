@@ -11,26 +11,26 @@ Everything that costs anything — generating modules, grading, chat — runs th
 | Data | Storage | Syncs via git? |
 |---|---|---|
 | Lessons, drill-downs, readings, outlines, research | `content/` | Yes — auto-committed per job |
-| Notes | `data/notes/*.md` | Yes |
+| Notes | `library/notes/*.md` | Yes |
 | Answers, highlights, chats, baseline attempts, job history | `data/app.db` (SQLite) | **No** |
 
 ## Design
 
-1. **Two repos.** The app repo is public and forkable (code, skills, rules, docs). The *library* repo is private and holds `content/`, `data/notes/`, `data/state/`. The app finds it through `LEARNING_DIR` (default `./library`). Updating the app never touches a course; sharing a course is sharing a repo.
+1. **One repo.** The app and the user's data live together; data sits under `library/` (`content/`, `notes/`, `state/`). Sync only ever stages the library path, so code you are editing is never swept into a state commit. `LEARNING_DIR` can point the library elsewhere (sync then runs in whichever repo contains it).
 2. **Files are the source of truth for user state; SQLite is an index.** Each write goes to the DB and to one small JSON file:
    ```
-   data/state/answers/<course>/<question>.json
-   data/state/annotations/<id>.json
-   data/state/chats/<id>.json          # chat + messages
-   data/state/attempts/<course>/<id>.json
+   library/state/answers/<course>/<question>.json
+   library/state/annotations/<id>.json
+   library/state/chats/<id>.json          # chat + messages
+   library/state/attempts/<course>/<id>.json
    ```
-   `app.db` is gitignored and rebuilt from these on start (`pnpm reindex` equivalent). One file per record keeps merges rare; when both devices touch the same record, the rebuild keeps the newer `updated_at`.
+   `data/app.db` is gitignored and rebuilt from these on start. One file per record keeps merges rare; when both devices touch the same record, the rebuild keeps the newer `updated_at`.
 3. **Git is automated.** `git pull --rebase` on start; `git push` after every job commit; state files committed after a minute of quiet and on shutdown. The user supplies credentials by having cloned the repo.
 4. **Chat sessions are per machine.** `--resume` uses `~/.claude`, which does not sync. If resume fails, start a new session whose first prompt replays the stored transcript. Messages live in the library; only the session handle is local.
 
 ## Status
 
-Built and verified 2026-10-29 — see [phase-4-results.md](phase-4-results.md). The library lives at `github.com/jacogrande/learning-library` (private).
+Built and verified 2026-10-29 — see [phase-4-results.md](phase-4-results.md). The repo is `github.com/jacogrande/learning` (private). An earlier version split the library into its own repo; it was folded back in because one clone per machine is simpler and the only benefit of the split (isolating data commits) is had by path-limiting the sync.
 
 ## Rejected
 
