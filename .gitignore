@@ -1,5 +1,4 @@
 node_modules/
-library/
 data/*.db*
 data/jobs/
 spike/out/
