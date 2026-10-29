@@ -6,25 +6,25 @@ allowed-tools: "Read,Glob,Write"
 disable-model-invocation: true
 ---
 
-Arguments: $ARGUMENTS (course slug, module id).
+Arguments: $ARGUMENTS — course slug, then module id; `NN` is the module's two-digit number. Paths are under `library/content/courses/<slug>/`.
 
-Read `outline.md` (this module's objectives; they are referenced as `obj-<module-nn>-<n>` by position, so the second objective of module `03-foo` is `obj-03-2`), every section in `modules/<id>/`, the `quiz` blocks already used in them, `quizzes/baseline-assessment.md`, and every earlier module's `understanding.md` and sections.
+Read `outline.md` (objectives `obj-NN-1`… by position), `learner.md`, every section in `modules/<id>/` and their `quiz` blocks, `modules/<id>/research/test-plan.md` if it exists, and every earlier module's `understanding.md`.
 
-Write `library/content/courses/<slug>/modules/<id>/quiz.md`:
+Write `modules/<id>/quiz.md`:
 
 ```markdown
 ---
-title: Module test
+title: "Module test"
 ---
-One line: what this test covers and that earlier ideas return on purpose.
+One sentence: what this test covers, that earlier ideas return on purpose, and that it is harder than the section checks because recall under difficulty is what lasts.
 ```
 
-Then 6–10 `quiz` blocks, ids `q-<module-nn>-t<nn>`, each with an `objective:` field:
+Then 6–10 `quiz` blocks, no prose between them, ids `q-NN-t01`, `q-NN-t02`…, every block with `objective:`:
 
-- **Every objective of this module gets at least two questions, and at least one of them is transfer**: apply the idea to a case the sections did not use. Recall alone does not show mastery.
-- **About a third of the questions re-ask ideas from earlier modules** (tag them with that module's objective id), interleaved with the new ones, not grouped. Prefer the objectives earlier `understanding.md` files mark `partial` or `unmet`, and confusable pairs across modules.
-- Default `short`. Use `mcq` only where plausible confusions are worth discriminating; distractors come from the misconceptions in the research files.
-- Do not reuse a question from the sections. Different cases, same objectives.
-- No prose between questions.
+- **One transfer question per objective**, from the test plan's case: a situation no section used. Recall alone does not show mastery.
+- **One discrimination question per confusable pair** the module introduced; distractors from the research files' misconceptions and from `learner.md` `errors`.
+- **Two to four earlier-module questions**, interleaved, tagged with that module's objective id. Prefer `carry` items and objectives marked `partial` or `unmet`. For the first module, use the baseline's wrong answers instead.
+- Cases come from the learner's `domains`, rotating. No case from any section.
+- Default `short`. `mcq` only where plausible confusions are worth telling apart.
 
 Reply with one line naming the file.

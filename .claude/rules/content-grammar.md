@@ -1,21 +1,21 @@
 # Content grammar
 
-Every file you write under `library/content/courses/` is Markdown that the app renders. The app has a fixed set of components; you never write HTML or JSX. A malformed block renders as an error card, so follow the grammar exactly.
+Every file under `library/content/courses/` is Markdown the app renders with fixed components. No HTML or JSX. A malformed block renders as an error card.
 
 ## Frontmatter
 
-Every file starts with YAML frontmatter. Required: `title`. Section files also need `order`. Any value that contains `: ` or starts with a quote goes in double quotes.
+YAML between `---` lines. `title` is required; section files also need `order`. Put every prose value in double quotes; escape inner quotes as `\"`. An unquoted colon in one value can drop a whole course.
 
 ```markdown
 ---
-title: Value stream mapping
-order: 2
+title: "Bottom line first: a document rule"
+order: 4
 ---
 ```
 
 ## Prose
 
-Plain CommonMark + GFM (tables, lists, bold, links). Headings start at `##` — the app renders `title` as the `#`. One idea per section. See `voice.md`.
+CommonMark + GFM. Headings start at `##`; the app renders `title` as the `#`. See `voice.md`.
 
 ## Callouts
 
@@ -25,13 +25,13 @@ One or two sentences. Types: note, tip, warning.
 :::
 
 :::predict
-A question the reader should answer in their head before reading on. Use before introducing a mechanism, rule, or counterintuitive result.
+One question the reader answers in their head before reading on. Once per section, before the mechanism or the counterintuitive result. The next paragraph answers it in its first sentence.
 :::
 ```
 
 ## Diagrams
 
-Only when a structural relationship would serialize badly as prose. Keep labels short; avoid parentheses and quotes inside node labels.
+Only for a relation the prose has not already stated, with four or more nodes. Short labels; no parentheses or quotes in node labels.
 
 ````markdown
 ```mermaid
@@ -42,39 +42,44 @@ flowchart LR
 
 ## Questions
 
-A fenced `quiz` block with a YAML body. Every section ends with one to three. Default to `short`; use `mcq` only when the options are plausible confusions worth discriminating.
+A fenced `quiz` block with a YAML body. Every section ends with one to three. Default `short`; `mcq` only when the distractors are confusions worth telling apart.
 
 ````markdown
 ```quiz
-id: q-vsm-01
+id: q-02-03
 type: short
-prompt: A step adds 3 minutes of work and 2 days of waiting. Which waste is this, and why?
-rubric: Names "waiting"; explains that lead time, not work time, dominates.
+objective: obj-02-1
+prompt: >-
+  A step adds 3 minutes of work and 2 days of waiting. Which waste is this, and why?
+rubric: >-
+  1. Waiting. 2. Lead time, not work time, dominates: two days against three minutes.
+  Wrong if: counts only the three minutes, or calls it overprocessing.
 ```
 
 ```quiz
-id: q-vsm-02
+id: q-02-04
 type: mcq
-prompt: Which metric does a value stream map add that a flowchart lacks?
+objective: obj-02-2
+prompt: >-
+  Which metric does a value stream map add that a flowchart lacks?
 options:
   - Step ownership
   - Time spent waiting between steps
   - Number of steps
   - Tooling per step
 answer: 1
-explanation: Flowcharts show sequence. Value stream maps add lead time and process time per step, which exposes waiting.
+explanation: >-
+  Flowcharts show sequence. Value stream maps add lead time and process time per step, which exposes waiting.
+  "Number of steps" tempts because both diagrams count them; neither one times them.
 ```
 ````
 
-Rules: `id` is unique within the course, stable, and kebab-case (`q-<module>-<nn>`). `answer` is a 0-based index. `mcq` needs `explanation`; `short` needs `rubric`. Keep prompts self-contained — the reader may see the question without the paragraph above it, and may be asked it again weeks later as spaced review. Every question in a module carries `objective: obj-<module-nn>-<n>`, the outline objective it tests (by position).
+Fields:
 
-The body is YAML, so any prose value that contains `: `, starts with a quote, or runs long goes in a block scalar:
+- `id`: unique in the course; never changed or reused. Patterns, two digits zero-padded: baseline `q-base-01`; section `q-02-03` (module number, question number counted across the module); warm-up review `q-02-r1`; module test `q-02-t03`; drill-down `q-02-dd01`.
+- `objective`: the outline objective the question tests, `obj-02-1` (module number, objective position). Required everywhere except the baseline.
+- `prompt`: self-contained; the reader may meet it weeks later as spaced review.
+- `rubric` (`short`): two to four numbered idea units, then a `Wrong if:` line naming the misconception. The learner may see it as the model answer; write it as one. No grader talk.
+- `options` (`mcq`): one line each, no `: ` inside. Every distractor is a misconception from the research files or a neighbouring idea from the module. `answer` is the 0-based index. `explanation`: why the answer is right and why the most tempting distractor tempts.
 
-```yaml
-prompt: >-
-  Fix this: "The report was late, the client noticed."
-```
-
-## Stable ids
-
-Once a quiz `id` exists, never change it or reuse it. When editing a section, preserve existing ids and mint new ones only for new questions.
+YAML: write `prompt`, `rubric`, and `explanation` as `>-` block scalars, always. Never a double-quoted scalar with `\"` escapes inside a quiz block. After writing an `mcq`, confirm `options[answer]` is the correct option.

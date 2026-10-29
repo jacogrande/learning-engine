@@ -1,30 +1,33 @@
 ---
 name: assess-baseline
-description: Grade a learner's baseline test answers and write an assessment the outline will build on.
+description: Grade a learner's baseline test answers, write the assessment the outline builds on, and seed the learner profile.
 argument-hint: "<slug>"
 allowed-tools: "Read,Glob,Write"
 disable-model-invocation: true
 ---
 
-Course slug: $ARGUMENTS. The learner's answers follow in this message as JSON (question id → answer; mcq answers are 0-based option indexes as strings).
+Course slug: $ARGUMENTS. The learner's answers follow as JSON (question id → answer; mcq answers are 0-based indexes as strings).
 
-1. Read `library/content/courses/<slug>/course.md`, `quizzes/baseline.md`, and `research/map.md`.
-2. Grade each answer. For `mcq`, compare to `answer`. For `short`, judge against `rubric` — partial credit is fine; note precisely what was present and what was missing. Unanswered questions count as gaps, not errors.
-3. Write `library/content/courses/<slug>/quizzes/baseline-assessment.md`:
+1. Read `course.md`, `learner.md`, `quizzes/baseline.md`, `research/map.md`.
+2. Grade each answer. `mcq`: compare to `answer`. `short`: score the rubric's idea units; partial credit is fine; say what was present and what was missing. Unanswered counts as a gap, not an error.
+3. Write `quizzes/baseline-assessment.md`:
 
 ```markdown
 ---
-title: Baseline assessment
-level: <novice | familiar | intermediate | advanced>
+title: "Baseline assessment"
+level: novice | familiar | proficient
+facets:
+  - name: "<facet from research/map.md>"
+    level: novice | familiar | proficient
 ---
 ## Where you are
-<Two or three sentences, addressed to the learner. Honest, specific, no praise padding.>
+<Two or three sentences to the learner. Specific. No praise padding.>
 
 ## Strengths
-- <facet or idea they clearly have, with the evidence (which question)>
+- <idea they have, with the question as evidence>
 
 ## Gaps
-- <facet or idea missing or confused, with the evidence; name the misconception if one showed>
+- <idea missing or confused, with the question; name the misconception if one showed>
 
 ## Per question
 | id | result | note |
@@ -32,4 +35,8 @@ level: <novice | familiar | intermediate | advanced>
 | q-base-01 | correct / partial / wrong / skipped | <one line> |
 ```
 
-4. Return the structured result the caller asked for — `level`, `summary`, `strengths`, `gaps`, and `questions` (one entry per question: `id`, `result`, `note`) — the same content as the file. The `note` is addressed to the learner, one or two sentences: what was right, what was missing.
+Levels: `novice` cannot produce the fix or recognize the idea; `familiar` produces the right fix but cannot name the move or state the rule; `proficient` applies and explains it on a case the question did not show.
+
+4. Update `learner.md`, keeping its `domains`. Add `vocabulary.owns` (terms used correctly, unprompted), `vocabulary.describes` (ideas they paraphrased instead of naming), and seed `errors` with each gap that looks like a pattern rather than a one-off, each with `seen: [q-base-..]`. One line per entry, every string quoted. Leave `level` for the outline.
+
+5. Return the JSON the schema asks for: `level`, `summary`, `strengths`, `gaps`, and per-question `id`, `result`, `note`. Each `note` is to the learner, one or two sentences.

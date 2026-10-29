@@ -17,7 +17,7 @@ const RESULT = { type: "string", enum: ["correct", "partial", "wrong", "skipped"
 const ASSESSMENT_SCHEMA = {
   type: "object",
   properties: {
-    level: { type: "string", enum: ["novice", "familiar", "intermediate", "advanced"] },
+    level: { type: "string", enum: ["novice", "familiar", "proficient"] },
     summary: { type: "string" },
     strengths: { type: "array", items: { type: "string" } },
     gaps: { type: "array", items: { type: "string" } },
@@ -58,29 +58,38 @@ function assess(slug: string, attempt: { id: string; answers: unknown }) {
 const notesPath = (slug: string, mod: string) => join(NOTES_DIR, slug, `${mod}.md`);
 const quoteBlock = (s: string) => s.split("\n").map((l) => `> ${l}`).join("\n");
 
-// One chat turn: the first uses the /chat skill with context; later turns resume the session.
+// Invariants for every tutor turn, including resumed ones, where the skill body is far back in context.
+const TUTOR_SYSTEM = `Your reply is shown to the learner verbatim. Produce exactly one reply and nothing else: no text before or between tool calls, no "I'll read…", no headings, no bullet lists unless listing is the point. Two to six sentences. At most one question per reply. Hold an answer back until the learner has made a real attempt; after that, give it straight. If they say something wrong, say so and why. Each learner message starts with its exchange number.`;
+
+// One chat turn: the first uses the /chat or /socratic skill with context; later turns resume the session.
 function sendChat(chat: any, content: string, record = true) {
   const mid = id();
   if (record) {
     db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [mid, chat.id, "user", content, now()]);
     state.chat(chat.id);
   }
+  // Exchange counter: the model cannot count its own turns across --resume; the five-step discussion needs it.
+  const turn = (db.query("SELECT count(*) n FROM messages WHERE chat=? AND role='assistant'").get(chat.id) as any).n + 1;
+  const tag = chat.kind === "summary" ? `[Exchange ${turn} of 5] ` : `[Exchange ${turn}] `;
   const opener = chat.kind === "summary"
     ? `/socratic ${chat.course} ${chat.module}\n\n${chat.context ? `${chat.context}\n\n` : ""}`
     : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `Selected passage:\n${quoteBlock(chat.context)}\n\n` : ""}`;
   let prompt: string;
-  if (chat.session_id) prompt = content;
+  if (chat.session_id) prompt = tag + content;
   else {
     // New session. On a machine that has no handle for an old chat, replay the transcript so far.
     // Exclude the message being sent (recorded under `mid`, or, on a retry, the latest user row).
     const skip = record ? mid : ((db.query("SELECT id FROM messages WHERE chat=? AND role='user' ORDER BY created_at DESC LIMIT 1").get(chat.id) as any)?.id ?? "");
     const prior = (db.query("SELECT role, content FROM messages WHERE chat=? AND id<>? ORDER BY created_at").all(chat.id, skip) as any[]);
-    const transcript = prior.length ? `Conversation so far:\n${prior.map((m) => `${m.role === "user" ? "Learner" : "You"}: ${m.content}`).join("\n\n")}\n\n` : "";
-    prompt = `${opener}${transcript}${chat.kind === "summary" && !prior.length ? "Learner's explanation of the module:\n" : "Learner: "}${content}`;
+    const label = (m: any, i: number) => (m.role === "user" ? (chat.kind === "summary" && i === 0 ? "Learner's explanation" : "Learner") : "You");
+    const transcript = prior.length
+      ? `This conversation started earlier on another machine. The transcript follows; lines marked "You:" are your own earlier replies. Continue from the last learner message; do not restart or repeat an earlier step.\n\n${prior.map((m, i) => `${label(m, i)}: ${m.content}`).join("\n\n")}\n\n`
+      : "";
+    prompt = `${opener}${transcript}${chat.kind === "summary" && !prior.length ? "Learner's explanation of the module:\n" : tag + "Learner: "}${content}`;
   }
   let text = "";
   enqueue(chat.course, "chat", prompt, {
-    ref: chat.id, resume: chat.session_id ?? undefined,
+    ref: chat.id, resume: chat.session_id ?? undefined, system: TUTOR_SYSTEM,
     stream: (delta, reset) => { if (reset) { text = ""; broadcast({ type: "chat", chat: chat.id, reset: true }); } else { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); } },
     then: (result, job) => {
       const reply = typeof result === "string" && result.trim() ? result : text;
@@ -108,6 +117,14 @@ const chatWithMessages = (cid: string) => ({
   chat: db.query("SELECT id, course, doc, kind, module, context, title, created_at createdAt FROM chats WHERE id=?").get(cid),
   messages: db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(cid),
 });
+
+// After a generation job: parse every quiz block the way the renderer does and report what the
+// model got wrong. Warnings go to the server log and the job's log; the content still renders.
+async function lintModule(course: string, mod: string) {
+  const { lint } = await import("./server/lint");
+  const problems = await lint(course, mod);
+  if (problems.length) { console.warn(`lint ${course}/${mod}:\n  ${problems.join("\n  ")}`); broadcast({ type: "lint", course, module: mod, problems }); }
+}
 
 function progressOf(course: string, mod: string) {
   const r = db.query("SELECT data FROM progress WHERE course=? AND module=?").get(course, mod) as any;
@@ -184,7 +201,7 @@ Bun.serve({
     },
     "/api/courses/:slug/outline": { POST: (req) => json(enqueue(req.params.slug, "outline", `/generate-outline ${req.params.slug}`)) },
     "/api/courses/:slug/modules/:id/generate": {
-      POST: (req) => json(enqueue(req.params.slug, "module", `/generate-module ${req.params.slug} ${req.params.id}`, { ref: req.params.id })),
+      POST: (req) => json(enqueue(req.params.slug, "module", `/generate-module ${req.params.slug} ${req.params.id}`, { ref: req.params.id, then: () => lintModule(req.params.slug, req.params.id) })),
     },
 
     // --- in-lesson answers ---------------------------------------------
@@ -287,7 +304,7 @@ Bun.serve({
       PUT: async (req) => { const patch = await req.json(); return json(saveProgress(req.params.slug, req.params.module, patch)); },
     },
     "/api/courses/:slug/modules/:id/test": {
-      POST: (req) => json(enqueue(req.params.slug, "test", `/generate-module-test ${req.params.slug} ${req.params.id}`, { ref: `${req.params.id}/test` })),
+      POST: (req) => json(enqueue(req.params.slug, "test", `/generate-module-test ${req.params.slug} ${req.params.id}`, { ref: `${req.params.id}/test`, then: () => lintModule(req.params.slug, req.params.id) })),
     },
     // The learner's explanation starts the wrap-up discussion.
     "/api/courses/:slug/modules/:id/discuss": {

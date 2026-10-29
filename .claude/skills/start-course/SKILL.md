@@ -1,6 +1,6 @@
 ---
 name: start-course
-description: Start a new course on a subject — clarify scope, research the breadth of the topic, and write the course scaffold and baseline test.
+description: Start a new course on a subject — clarify scope, research the breadth of the topic, and write the course scaffold, learner profile and baseline test.
 argument-hint: "<subject>"
 allowed-tools: "Read,Write,Glob,Agent,AskUserQuestion"
 disable-model-invocation: true
@@ -10,15 +10,15 @@ Subject: $ARGUMENTS
 
 ## 1. Clarify
 
-Ask the learner, in one round, what you need to plan well. Typically: target depth (entry level / working practitioner / expert), what they already know or have done, what they want to be able to *do* afterward, and any angle to emphasize or avoid. Skip questions the subject line already answers.
+Ask the learner, in one round: target depth (entry level / working practitioner / expert), what they already know or have done, what they want to be able to *do* afterward, and what they are producing with it right now (the documents, code, decisions, or work the course should draw examples from). Skip questions the subject line already answers.
 
-Pick a short kebab-case slug for the course directory. Stop and ask if `library/content/courses/<slug>/` already exists.
+Pick a short kebab-case slug. Stop and ask if `library/content/courses/<slug>/` already exists.
 
 ## 2. Research the breadth
 
-Identify 3–5 facets that together cover the subject at the chosen depth. Launch one `topic-researcher` subagent per facet, **in parallel**, each writing to `library/content/courses/<slug>/research/<facet>.md`. Wait for all of them.
+Identify 3–5 facets that together cover the subject at the chosen depth. Launch one `topic-researcher` per facet, in parallel. Each prompt states: the subject, the depth, what the learner wants to be able to do and what they produce, this facet, the other facets by name (so it stays out of them), and the output path `library/content/courses/<slug>/research/<facet>.md`. Wait for all, then read the files; do not rely on the agents' replies.
 
-Then write `research/map.md`: the territory in one page — the main talking points, how facets relate, which ideas are foundational vs. advanced, and the misconceptions worth testing. This is the planning document later skills read.
+Write `research/map.md`: the territory in one page — the main talking points, how facets relate, which ideas are foundational vs. advanced, the one to three threshold concepts (ideas that change how the learner sees everything after, and that they will resist), and the misconceptions worth testing. Later skills plan from this file.
 
 ## 3. Scaffold
 
@@ -26,22 +26,35 @@ Write `library/content/courses/<slug>/course.md`:
 
 ```markdown
 ---
-title: <Title>
-depth: <entry | practitioner | expert>
+title: "<Title>"
+depth: entry | practitioner | expert
 goals:
-  - <what the learner said they want to be able to do>
+  - "<what the learner said they want to be able to do>"
 ---
 <One paragraph: what this course covers and for whom. Voice rules apply.>
 ```
 
+Write `library/content/courses/<slug>/learner.md`:
+
+```markdown
+---
+title: "Learner"
+domains:
+  - "<what they produce, most frequent first>"
+---
+```
+
+Nothing else; `/assess-baseline`, `/generate-outline` and `/wrap-module` fill the rest.
+
 ## 4. Baseline test
 
-Write `library/content/courses/<slug>/quizzes/baseline.md`. Frontmatter `title: Baseline`. Then 8–12 `quiz` blocks (see the content grammar), ids `q-base-01`…:
+Write `library/content/courses/<slug>/quizzes/baseline.md`, frontmatter `title: "Baseline"`, then 8–12 `quiz` blocks, ids `q-base-01` through `q-base-12`, no `objective` field, every `prompt` and `rubric` a `>-` block scalar:
 
 - Cover each facet; span easy → hard so the result discriminates.
-- Mix: roughly half `mcq` with distractors drawn from the misconceptions in `research/map.md`, half `short` asking the learner to explain or apply.
-- Start with one short line of prose telling the learner that wrong answers are expected and will shape the course. No other prose between questions.
+- Roughly half `mcq`, distractors from the misconceptions in `research/map.md`; half `short`.
+- Each facet gets at least one `short` question that asks the learner to *name* the move or rule behind a fix, not only to make it. That separates familiar from proficient.
+- One line of prose first, telling the learner wrong answers are expected and shape the course. No other prose.
 
 ## 5. Finish
 
-Tell the learner the course is ready at `http://localhost:4000/c/<slug>` and that the baseline test is the only thing there until they take it.
+Tell the learner the course is at `http://localhost:4000/c/<slug>` and that the baseline is the only thing there until they take it.

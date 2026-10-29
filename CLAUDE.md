@@ -7,19 +7,20 @@ A personal course system. Claude Code researches a subject, writes the course as
 ```
 library/content/courses/<slug>/
   course.md                      # frontmatter: title, depth, goals; body: one-paragraph description
-  research/*.md                  # breadth research from /start-course (talking-point map, sources)
+  learner.md                     # profile: domains, per-objective level, vocabulary, error patterns (start-course seeds; assess, outline and wrap-module update)
+  research/*.md                  # breadth research from /start-course; map.md is the planning doc
   quizzes/baseline.md            # diagnostic: quiz blocks only
   quizzes/baseline-assessment.md # written by /assess-baseline
   outline.md                     # frontmatter `modules:` list; body: rationale
   modules/<id>/
-    research/*.md                # depth research for that module
+    research/*.md                # depth research and test-plan.md for that module
     01-<slug>.md …               # sections, in order (frontmatter: title, order)
-    quiz.md                      # module test (generate-module-test)
-    understanding.md             # what the learner has, written at wrap-up (wrap-module); later modules read it
+    quiz.md                      # module test
+    understanding.md             # what the learner has, written at wrap-up; later modules read it
     drilldowns/, readings/       # generated from selections
 ```
 
-Objectives live in `outline.md` and are referenced as `obj-<module-nn>-<n>` by position.
+Objectives live in `outline.md`. Their ids are positional: the second objective of module `03-foo` is `obj-03-2`. Skill arguments arrive as `$ARGUMENTS`, space-separated, in the order the skill names them.
 
 ## Rules
 

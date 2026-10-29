@@ -17,6 +17,7 @@ export type Job = {
 };
 type Opts = {
   ref?: string; schema?: object; resume?: string;
+  system?: string;                                   // --append-system-prompt: invariants that must survive --resume
   stream?: (text: string, reset?: boolean) => void;   // text deltas, for chat; reset at each new assistant turn
   then?: (result: unknown, job: Job) => void;
   fail?: (job: Job) => void;
@@ -122,6 +123,7 @@ function pump(lane: Lane) {
     "--max-turns", lane === "heavy" ? "80" : "15",
     ...(o.schema ? ["--json-schema", JSON.stringify(o.schema)] : []),
     ...(o.resume ? ["--resume", o.resume] : []),
+    ...(o.system ? ["--append-system-prompt", o.system] : []),
   ];
   // Own process group, so cancelling kills claude *and* the subagents it spawned.
   const child = spawn("claude", args, { cwd: ROOT, env: env(), stdio: ["ignore", "pipe", "pipe"], detached: true });

@@ -40,7 +40,7 @@ async function mdFiles(dir: string): Promise<string[]> {
 export type Section = { file: string; title: string };
 // Drill-downs and reading lists generated from a selection; `section` is the file they came from.
 export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
-export type Objective = { id: string; text: string; status?: "met" | "partial" | "unmet"; evidence?: string };
+export type Objective = { id: string; text: string; level?: string; status?: "met" | "partial" | "unmet"; evidence?: string };
 export type Module = {
   id: string; title: string; summary?: string; objectives: Objective[];
   status: "planned" | "ready"; sections: Section[]; extras: Extra[];
@@ -90,7 +90,7 @@ export async function getCourse(slug: string): Promise<Course | null> {
     const statuses = Object.fromEntries(((u?.frontmatter.objectives ?? []) as any[]).map((o) => [o.id, o]));
     const objectives: Objective[] = (m.objectives ?? []).map((text: string, i: number) => {
       const id = `obj-${nn}-${i + 1}`;
-      return { id, text, status: statuses[id]?.status, evidence: statuses[id]?.evidence };
+      return { id, text: typeof text === "string" ? text : String((text as any)?.text ?? ""), level: m.levels?.[i], status: statuses[id]?.status, evidence: statuses[id]?.evidence };
     });
     const sectionFiles = files.filter((f) => f !== "quiz.md" && f !== "understanding.md");
     modules.push({
