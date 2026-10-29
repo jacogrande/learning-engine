@@ -6,6 +6,9 @@ import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
 import { ReviewPage } from "./Review";
 
+// A server started before the client was updated still sends objectives as strings.
+export const objectiveText = (o: { text?: string } | string) => (typeof o === "string" ? o : o.text ?? "");
+
 // --- tiny router ---------------------------------------------------------
 function usePath() {
   const [path, setPath] = useState(location.pathname);
@@ -161,7 +164,7 @@ function Outline({ course }: { course: Course }) {
             {b && <p className="muted note">Last run {b.status}{b.error ? ` — ${b.error}` : ""}.{n > 0 && ` Resume keeps the ${n} section${n === 1 ? "" : "s"} already written.`}</p>}
             {m.summary && <p className="muted">{m.summary}</p>}
             {m.understanding?.summary && <p className="muted">{m.understanding.summary}</p>}
-            <ul className="objectives">{m.objectives.map((o) => <li key={o.id} className={o.status ? `is-${o.status}` : ""}>{o.status && <span className="quiz-status">{o.status}</span>}{o.text}</li>)}</ul>
+            <ul className="objectives">{m.objectives.map((o, i) => <li key={o.id ?? i} className={o.status ? `is-${o.status}` : ""}>{o.status && <span className="quiz-status">{o.status}</span>}{objectiveText(o)}</li>)}</ul>
           </li>
         );
       })}

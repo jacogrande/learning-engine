@@ -12,6 +12,8 @@ Take the baseline in the browser; the outline builds itself; generate modules fr
 
 **Another machine:** clone this repo, `bun install`, `bun run dev`. The app pulls on start and pushes as you work.
 
+**After app updates** (a pull that touched `app/server/`), restart `bun run dev`: the client hot-reloads, the server does not.
+
 **Docs:** `bun run docs` → http://localhost:8000 — [vision](docs/vision.md), [roadmap](docs/roadmap.md), feasibility, and per-phase results.
 
 ```

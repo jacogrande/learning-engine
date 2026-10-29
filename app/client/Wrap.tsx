@@ -5,7 +5,7 @@ import { get, post, put, useJobs, useLive, type Course, type Doc, type Module } 
 import { Editor, type EditorHandle } from "./Editor";
 import { Thread } from "./Chat";
 import { Markdown } from "./Markdown";
-import { Link } from "./App";
+import { Link, objectiveText } from "./App";
 
 type Progress = { summary?: string; chat?: string; discussedAt?: string; completedAt?: string; read?: Record<string, string> };
 
@@ -49,7 +49,7 @@ export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod:
       <p className="kicker">Wrap-up · teach it</p>
       <h1>{mod.title}</h1>
       <p className="lede">Explain this module to a smart colleague who missed it. Cover what it claims, how it works, one worked example of your own, and where it stops applying. Write it from memory; the sections stay closed.</p>
-      <ul className="objectives wrap-objectives">{mod.objectives.map((o) => <li key={o.id}>{o.text}</li>)}</ul>
+      <ul className="objectives wrap-objectives">{mod.objectives.map((o, i) => <li key={o.id ?? i}>{objectiveText(o)}</li>)}</ul>
       <Editor ref={editor} value={p.summary ?? ""} placeholder="Start with the main claim." className="wrap-editor" onChange={save} />
       <footer className="article-foot">
         <span className="muted">{words} words{words > 0 && words < 120 ? " · aim for 150–400" : ""}</span>
@@ -70,7 +70,7 @@ function Understanding({ slug, mod, next }: { slug: string; mod: Module; next?: 
         <div className="analysis-head"><span className="level">{u.level}</span><span className="muted">{mod.objectives.filter((o) => o.status === "met").length} of {mod.objectives.length} objectives met</span></div>
         {u.summary && <p>{u.summary}</p>}
         <ul className="objective-status">
-          {mod.objectives.map((o) => <li key={o.id} className={`is-${o.status ?? "unmet"}`}><span className="quiz-status">{o.status ?? "unmet"}</span><span>{o.text}</span>{o.evidence && <small className="muted">{o.evidence}</small>}</li>)}
+          {mod.objectives.map((o, i) => <li key={o.id ?? i} className={`is-${o.status ?? "unmet"}`}><span className="quiz-status">{o.status ?? "unmet"}</span><span>{objectiveText(o)}</span>{o.evidence && <small className="muted">{o.evidence}</small>}</li>)}
         </ul>
         {u.calibration && <p className="muted"><strong>Calibration.</strong> {u.calibration}</p>}
       </div>
