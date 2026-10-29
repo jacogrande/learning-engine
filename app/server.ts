@@ -7,6 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
+import { rate, due, question, mastery } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -64,19 +65,21 @@ function sendChat(chat: any, content: string, record = true) {
     db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [mid, chat.id, "user", content, now()]);
     state.chat(chat.id);
   }
-  const opener = `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `Selected passage:\n${quoteBlock(chat.context)}\n\n` : ""}`;
+  const opener = chat.kind === "summary"
+    ? `/socratic ${chat.course} ${chat.module}\n\n${chat.context ? `${chat.context}\n\n` : ""}`
+    : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `Selected passage:\n${quoteBlock(chat.context)}\n\n` : ""}`;
   let prompt: string;
   if (chat.session_id) prompt = content;
   else {
     // New session. On a machine that has no handle for an old chat, replay the transcript so far.
     const prior = (db.query("SELECT role, content FROM messages WHERE chat=? AND id<>? ORDER BY created_at").all(chat.id, mid) as any[]);
     const transcript = prior.length ? `Conversation so far:\n${prior.map((m) => `${m.role === "user" ? "Learner" : "You"}: ${m.content}`).join("\n\n")}\n\n` : "";
-    prompt = `${opener}${transcript}Learner: ${content}`;
+    prompt = `${opener}${transcript}${chat.kind === "summary" && !prior.length ? "Learner's explanation of the module:\n" : "Learner: "}${content}`;
   }
   let text = "";
   enqueue(chat.course, "chat", prompt, {
     ref: chat.id, resume: chat.session_id ?? undefined,
-    stream: (delta) => { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); },
+    stream: (delta, reset) => { if (reset) { text = ""; broadcast({ type: "chat", chat: chat.id, reset: true }); } else { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); } },
     then: (result, job) => {
       const reply = typeof result === "string" && result.trim() ? result : text;
       const aid = id();
@@ -95,9 +98,32 @@ function sendChat(chat: any, content: string, record = true) {
   return { id: mid, role: "user", content };
 }
 const chatWithMessages = (cid: string) => ({
-  chat: db.query("SELECT id, course, doc, context, title, created_at createdAt FROM chats WHERE id=?").get(cid),
+  chat: db.query("SELECT id, course, doc, kind, module, context, title, created_at createdAt FROM chats WHERE id=?").get(cid),
   messages: db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(cid),
 });
+
+function progressOf(course: string, mod: string) {
+  const r = db.query("SELECT data FROM progress WHERE course=? AND module=?").get(course, mod) as any;
+  return r ? JSON.parse(r.data) : {};
+}
+function saveProgress(course: string, mod: string, patch: Record<string, unknown>) {
+  const next = { ...progressOf(course, mod), ...patch };
+  db.run("INSERT INTO progress (course, module, data, updated_at) VALUES (?,?,?,?) ON CONFLICT(course, module) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at", [course, mod, JSON.stringify(next), now()]);
+  state.progress(course, mod);
+  broadcast({ type: "content" });
+  return next;
+}
+// Everything the wrap-up judges from: the explanation, the discussion, every answer with its
+// objective and confidence, and the review schedule.
+async function evidence(course: string, mod: string) {
+  const p = progressOf(course, mod);
+  const rows = db.query("SELECT question, doc, answer, result, note, confidence, graded_at gradedAt FROM answers WHERE course=? AND doc LIKE ?").all(course, `modules/${mod}/%`) as any[];
+  const answers = [];
+  for (const a of rows) { const spec = await question(course, a.doc, a.question); answers.push({ ...a, objective: spec?.objective ?? null, type: spec?.type ?? null, prompt: spec?.prompt ?? null }); }
+  const chat = p.chat ? (db.query("SELECT role, content FROM messages WHERE chat=? ORDER BY created_at").all(p.chat) as any[]) : [];
+  const cards = db.query("SELECT question, streak, due FROM cards WHERE course=? AND module=?").all(course, mod);
+  return { summary: p.summary ?? "", discussion: chat, answers, cards };
+}
 
 migrate();
 sync.afterPull(() => { rebuild(); broadcast({ type: "content" }); });
@@ -155,26 +181,29 @@ Bun.serve({
 
     // --- in-lesson answers ---------------------------------------------
     "/api/courses/:slug/answers": {
-      GET: (req) => json(db.query("SELECT question, answer, result, note, job, graded_at gradedAt FROM answers WHERE course=? AND doc=?").all(req.params.slug, q(req, "doc"))),
+      GET: (req) => json(db.query("SELECT question, answer, result, note, job, confidence, graded_at gradedAt FROM answers WHERE course=? AND doc=?").all(req.params.slug, q(req, "doc"))),
+      // Confidence is recorded before feedback; the result feeds the spaced-review schedule.
       POST: async (req) => {
         const slug = req.params.slug;
-        const { question, doc, answer, type, result } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string };
+        const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
         let job: string | null = null;
         if (type === "short") {
-          job = enqueue(slug, "grade", `/grade ${slug} ${doc} ${question}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
-            ref: question, schema: GRADE_SCHEMA,
+          job = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
+            ref: qid, schema: GRADE_SCHEMA,
             then: (g: any) => {
-              db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=?", [g.result, g.note, now(), slug, question]);
-              state.answer(slug, question);
-              broadcast({ type: "answer", course: slug, doc, question });
+              db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=?", [g.result, g.note, now(), slug, qid]);
+              state.answer(slug, qid);
+              rate(slug, qid, doc, g.result, confidence);
+              broadcast({ type: "answer", course: slug, doc, question: qid });
             },
           }).id;
         }
-        db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(course, question) DO UPDATE SET answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
-          [slug, question, doc, answer, type === "mcq" ? result ?? null : null, null, job, now(), type === "mcq" ? now() : null]);
-        state.answer(slug, question);
-        return json({ ok: true, job });
+        db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, confidence, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
+          [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, now(), type === "mcq" ? now() : null]);
+        state.answer(slug, qid);
+        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence) : null;
+        return json({ ok: true, job, review });
       },
     },
 
@@ -206,11 +235,11 @@ Bun.serve({
 
     // --- chat -------------------------------------------------------------
     "/api/courses/:slug/chats": {
-      GET: (req) => json(db.query("SELECT id, doc, context, title, created_at createdAt FROM chats WHERE course=? AND doc=? ORDER BY updated_at DESC").all(req.params.slug, q(req, "doc"))),
+      GET: (req) => json(db.query("SELECT id, doc, context, title, created_at createdAt FROM chats WHERE course=? AND doc=? AND kind='section' ORDER BY updated_at DESC").all(req.params.slug, q(req, "doc"))),
       POST: async (req) => {
         const { doc, context, message } = (await req.json()) as { doc: string; context?: string; message: string };
-        const chat = { id: id(), course: req.params.slug, doc, context: context ?? null, title: (context ?? message).slice(0, 60), session_id: null };
-        db.run("INSERT INTO chats (id, course, doc, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?)", [chat.id, chat.course, doc, chat.context, chat.title, null, now(), now()]);
+        const chat = { id: id(), course: req.params.slug, doc, kind: "section", module: null, context: context ?? null, title: (context ?? message).slice(0, 60), session_id: null };
+        db.run("INSERT INTO chats (id, course, doc, kind, module, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", [chat.id, chat.course, doc, "section", null, chat.context, chat.title, null, now(), now()]);
         sendChat(chat, message);
         return json(chatWithMessages(chat.id));
       },
@@ -239,6 +268,42 @@ Bun.serve({
         return json(enqueue(req.params.slug, "reading", `/find-reading ${req.params.slug} ${doc}\n\nSelected passage:\n${quoteBlock(quote)}`, { ref: doc }));
       },
     },
+
+    // --- phase 3: progress, module test, wrap-up, review ----------------
+    "/api/courses/:slug/question": async (req) => { const spec = await question(req.params.slug, q(req, "doc"), q(req, "id")); return spec ? json(spec) : json({ error: "not found" }, 404); },
+    "/api/courses/:slug/progress/:module": {
+      GET: (req) => json(progressOf(req.params.slug, req.params.module)),
+      PUT: async (req) => { const patch = await req.json(); return json(saveProgress(req.params.slug, req.params.module, patch)); },
+    },
+    "/api/courses/:slug/modules/:id/test": {
+      POST: (req) => json(enqueue(req.params.slug, "test", `/generate-module-test ${req.params.slug} ${req.params.id}`, { ref: `${req.params.id}/test` })),
+    },
+    // The learner's explanation starts the wrap-up discussion.
+    "/api/courses/:slug/modules/:id/discuss": {
+      POST: async (req) => {
+        const { slug, id: mod } = req.params;
+        const { summary } = (await req.json()) as { summary: string };
+        const ev = await evidence(slug, mod);
+        const results = ev.answers.filter((a) => a.doc.endsWith("/quiz.md")).map((a) => `${a.question} (${a.objective ?? "?"}): ${a.result ?? "ungraded"}, confidence ${a.confidence ?? "?"}`).join("\n");
+        const chat = { id: id(), course: slug, doc: `modules/${mod}`, kind: "summary", module: mod, context: results ? `Their module test results:\n${results}` : null, title: "Wrap-up discussion", session_id: null };
+        db.run("INSERT INTO chats (id, course, doc, kind, module, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", [chat.id, slug, chat.doc, chat.kind, mod, chat.context, chat.title, null, now(), now()]);
+        saveProgress(slug, mod, { summary, chat: chat.id, discussedAt: now() });
+        sendChat(chat, summary);
+        return json(chatWithMessages(chat.id));
+      },
+    },
+    "/api/courses/:slug/modules/:id/finish": {
+      POST: async (req) => {
+        const { slug, id: mod } = req.params;
+        const ev = await evidence(slug, mod);
+        const job = enqueue(slug, "wrap", `/wrap-module ${slug} ${mod}\n\nEvidence:\n${JSON.stringify(ev, null, 2)}`, {
+          ref: `${mod}/wrap`,
+          then: () => { saveProgress(slug, mod, { completedAt: now() }); },
+        });
+        return json(job);
+      },
+    },
+    "/api/courses/:slug/review": async (req) => json({ ...(await due(req.params.slug)), mastery: mastery(req.params.slug) }),
 
     "/api/sync": {
       GET: () => json(sync.status),

@@ -2,19 +2,21 @@ import { useEffect, useState, useCallback } from "react";
 
 export type Section = { file: string; title: string };
 export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
-export type Module = { id: string; title: string; summary?: string; objectives?: string[]; status: "planned" | "ready"; sections: Section[]; extras: Extra[] };
+export type Objective = { id: string; text: string; status?: "met" | "partial" | "unmet"; evidence?: string };
+export type Understanding = { level?: string; summary?: string; calibration?: string; carry?: string[] };
+export type Module = { id: string; title: string; summary?: string; objectives: Objective[]; status: "planned" | "ready"; sections: Section[]; extras: Extra[]; test: boolean; understanding: Understanding | null };
 export type Course = { slug: string; title: string; depth?: string; description: string; stage: "baseline" | "assessed" | "ready"; modules: Module[] };
 export type Doc = { frontmatter: Record<string, any>; body: string };
 export type Result = "correct" | "partial" | "wrong" | "skipped";
 export type Grade = { level: string; summary: string; strengths: string[]; gaps: string[]; questions: { id: string; result: Result; note: string }[] };
 export type Attempt = { id: string; answers: Record<string, string>; grade: Grade | null; createdAt: string };
 export type QuizState = { draft: Record<string, string> | null; attempt: Attempt | null };
-export type Answer = { question: string; answer: string; result: Result | null; note: string | null; job: string | null; gradedAt: string | null };
+export type Answer = { question: string; answer: string; result: Result | null; note: string | null; job: string | null; confidence?: number | null; gradedAt: string | null };
 export type Annotation = { id: string; doc: string; quote: string; prefix: string; suffix: string; createdAt: string };
 export type Chat = { id: string; doc: string; context: string | null; title: string; createdAt: string };
 export type Message = { id: string; role: "user" | "assistant"; content: string };
 export type SyncStatus = { repo: boolean; remote: string | null; branch: string | null; busy: string | null; dirty: boolean; lastPull: string | null; lastPush: string | null; error: string | null };
-export type Job = { id: string; course: string; kind: "assess" | "outline" | "module" | "drilldown" | "reading" | "grade" | "chat"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
+export type Job = { id: string; course: string; kind: "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
 
 export const get = <T,>(url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 const send = (method: string) => <T,>(url: string, body?: unknown) =>

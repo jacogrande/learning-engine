@@ -14,7 +14,12 @@ library/content/courses/<slug>/
   modules/<id>/
     research/*.md                # depth research for that module
     01-<slug>.md …               # sections, in order (frontmatter: title, order)
+    quiz.md                      # module test (generate-module-test)
+    understanding.md             # what the learner has, written at wrap-up (wrap-module); later modules read it
+    drilldowns/, readings/       # generated from selections
 ```
+
+Objectives live in `outline.md` and are referenced as `obj-<module-nn>-<n>` by position.
 
 ## Rules
 

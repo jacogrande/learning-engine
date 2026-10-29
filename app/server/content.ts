@@ -40,9 +40,12 @@ async function mdFiles(dir: string): Promise<string[]> {
 export type Section = { file: string; title: string };
 // Drill-downs and reading lists generated from a selection; `section` is the file they came from.
 export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
+export type Objective = { id: string; text: string; status?: "met" | "partial" | "unmet"; evidence?: string };
 export type Module = {
-  id: string; title: string; summary?: string; objectives?: string[];
+  id: string; title: string; summary?: string; objectives: Objective[];
   status: "planned" | "ready"; sections: Section[]; extras: Extra[];
+  test: boolean;            // modules/<id>/quiz.md exists
+  understanding: null | { level?: string; summary?: string; calibration?: string; carry?: string[] };
 };
 export type Course = {
   slug: string; title: string; depth?: string; description: string;
@@ -80,7 +83,22 @@ export async function getCourse(slug: string): Promise<Course | null> {
         const d = await readDoc(join(dir, "modules", m.id, sub, file));
         extras.push({ file: `${sub}/${file}`, kind, title: d?.frontmatter.title ?? basename(file, ".md"), section: d?.frontmatter.section });
       }
-    modules.push({ ...m, status: sections.length ? "ready" : "planned", sections, extras });
+    // Objectives are referenced by position: obj-<module-nn>-<n>. The understanding summary,
+    // written at wrap-up, carries their status.
+    const nn = m.id.slice(0, 2);
+    const u = await readDoc(join(dir, "modules", m.id, "understanding.md"));
+    const statuses = Object.fromEntries(((u?.frontmatter.objectives ?? []) as any[]).map((o) => [o.id, o]));
+    const objectives: Objective[] = (m.objectives ?? []).map((text: string, i: number) => {
+      const id = `obj-${nn}-${i + 1}`;
+      return { id, text, status: statuses[id]?.status, evidence: statuses[id]?.evidence };
+    });
+    const sectionFiles = files.filter((f) => f !== "quiz.md" && f !== "understanding.md");
+    modules.push({
+      ...m, objectives, status: sectionFiles.length ? "ready" : "planned",
+      sections: sections.filter((s) => sectionFiles.includes(s.file)), extras,
+      test: files.includes("quiz.md"),
+      understanding: u ? { level: u.frontmatter.level, summary: u.frontmatter.summary, calibration: u.frontmatter.calibration, carry: u.frontmatter.carry } : null,
+    });
   }
 
   return { slug, title: course.frontmatter.title ?? slug, depth: course.frontmatter.depth, description: course.body.trim(), stage, modules };

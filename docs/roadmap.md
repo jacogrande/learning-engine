@@ -26,7 +26,7 @@ Everything you do while reading. Grading with structured feedback appended into 
 
 **Done when:** you can highlight a sentence, drill into it, ask Claude about it, and keep notes — and all of it survives a module regeneration.
 
-### Phase 3 — Teach *(1 week)*
+### Phase 3 — Teach *(1 week)* — done, see [phase-3-results.md](phase-3-results.md)
 The pedagogy loop. End-of-module "teach it to a colleague" summary, Socratic chat with the hint ladder, understanding summary written to disk for future modules to read. Confidence ratings before feedback, predict-first blocks, FSRS spaced review pulling earlier objectives into later quizzes, mastery gate on unassisted recalls.
 
 **Done when:** finishing a module produces an understanding summary that the next module visibly builds on.

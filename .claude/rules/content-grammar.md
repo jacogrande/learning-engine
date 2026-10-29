@@ -66,7 +66,7 @@ explanation: Flowcharts show sequence. Value stream maps add lead time and proce
 ```
 ````
 
-Rules: `id` is unique within the course, stable, and kebab-case (`q-<module>-<nn>`). `answer` is a 0-based index. `mcq` needs `explanation`; `short` needs `rubric`. Keep prompts self-contained — the reader may see the question without the paragraph above it.
+Rules: `id` is unique within the course, stable, and kebab-case (`q-<module>-<nn>`). `answer` is a 0-based index. `mcq` needs `explanation`; `short` needs `rubric`. Keep prompts self-contained — the reader may see the question without the paragraph above it, and may be asked it again weeks later as spaced review. Every question in a module carries `objective: obj-<module-nn>-<n>`, the outline objective it tests (by position).
 
 The body is YAML, so any prose value that contains `: `, starts with a quote, or runs long goes in a block scalar:
 

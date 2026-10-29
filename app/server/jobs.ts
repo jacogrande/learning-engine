@@ -8,7 +8,7 @@ import { ROOT } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
-export type JobKind = "assess" | "outline" | "module" | "drilldown" | "reading" | "grade" | "chat";
+export type JobKind = "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat";
 type Lane = "heavy" | "light";
 export type Job = {
   id: string; course: string; kind: JobKind; ref?: string;
@@ -17,23 +17,25 @@ export type Job = {
 };
 type Opts = {
   ref?: string; schema?: object; resume?: string;
-  stream?: (text: string) => void;                 // text deltas, for chat
+  stream?: (text: string, reset?: boolean) => void;   // text deltas, for chat; reset at each new assistant turn
   then?: (result: unknown, job: Job) => void;
   fail?: (job: Job) => void;
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { assess: "heavy", outline: "heavy", module: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light" };
+const LANE: Record<JobKind, Lane> = { assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light" };
 const TOOLS: Record<JobKind, string> = {
   assess: "Read,Glob,Write",
   outline: "Read,Glob,Write",
   module: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch",
+  test: "Read,Glob,Write",
+  wrap: "Read,Glob,Write",
   drilldown: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch",
   reading: "Read,Glob,Write,WebSearch,WebFetch",
   grade: "Read",
   chat: "Read,Glob,Grep",
 };
-const COMMITS: Partial<Record<JobKind, true>> = { assess: true, outline: true, module: true, drilldown: true, reading: true };
+const COMMITS: Partial<Record<JobKind, true>> = { assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true };
 
 const LOG_DIR = join(ROOT, "data/jobs");
 mkdirSync(LOG_DIR, { recursive: true });
@@ -161,6 +163,7 @@ function handle(job: Queued, line: string) {
     act(`started (${ev.model})`);
   } else if (ev.type === "stream_event") {
     const d = ev.event?.delta;
+    if (ev.event?.type === "message_start") job._opts.stream?.("", true);   // a new turn: drop narration from the last one
     if (d?.type === "text_delta" && d.text) job._opts.stream?.(d.text);
   } else if (ev.type === "assistant") {
     for (const c of ev.message?.content ?? []) {

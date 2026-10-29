@@ -21,7 +21,7 @@ db.run(`
   -- one row per in-lesson question; short answers are graded by a job
   CREATE TABLE IF NOT EXISTS answers (
     course TEXT NOT NULL, question TEXT NOT NULL, doc TEXT NOT NULL,
-    answer TEXT NOT NULL, result TEXT, note TEXT, job TEXT,
+    answer TEXT NOT NULL, result TEXT, note TEXT, job TEXT, confidence INTEGER,
     updated_at TEXT NOT NULL, graded_at TEXT,
     PRIMARY KEY (course, question)
   );
@@ -32,13 +32,29 @@ db.run(`
   );
   CREATE TABLE IF NOT EXISTS chats (
     id TEXT PRIMARY KEY, course TEXT NOT NULL, doc TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'section', module TEXT,
     context TEXT, title TEXT, session_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   );
   CREATE TABLE IF NOT EXISTS messages (
     id TEXT PRIMARY KEY, chat TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     role TEXT NOT NULL, content TEXT NOT NULL, created_at TEXT NOT NULL
   );
+  -- per-module progress: sections read, the learner's summary, wrap-up chat, completion
+  CREATE TABLE IF NOT EXISTS progress (
+    course TEXT NOT NULL, module TEXT NOT NULL, data TEXT NOT NULL, updated_at TEXT NOT NULL,
+    PRIMARY KEY (course, module)
+  );
+  -- spaced-repetition cards (ts-fsrs), one per question ever answered
+  CREATE TABLE IF NOT EXISTS cards (
+    course TEXT NOT NULL, question TEXT NOT NULL, doc TEXT NOT NULL, module TEXT,
+    due TEXT NOT NULL, card TEXT NOT NULL, streak INTEGER NOT NULL DEFAULT 0, log TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (course, question)
+  );
 `);
+// Columns added after the first release.
+for (const [table, col, type] of [["answers", "confidence", "INTEGER"], ["chats", "kind", "TEXT NOT NULL DEFAULT 'section'"], ["chats", "module", "TEXT"]])
+  if (!(db.query(`PRAGMA table_info(${table})`).all() as any[]).some((c) => c.name === col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 
 export const id = () => crypto.randomUUID().slice(0, 8);
 export const now = () => new Date().toISOString();

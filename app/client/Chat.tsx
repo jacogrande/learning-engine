@@ -28,7 +28,8 @@ export function ChatPane({ slug, doc, draft, onDraftUsed }: { slug: string; doc:
   );
 }
 
-function Thread({ id, onBack }: { id: string; onBack: () => void }) {
+// A thread. `onTurns` reports how many assistant replies exist (the wrap-up gates on it).
+export function Thread({ id, onBack, onTurns, hideContext }: { id: string; onBack?: () => void; onTurns?: (n: number) => void; hideContext?: boolean }) {
   const [chat, setChat] = useState<ChatRow | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<string | null>(null);   // assistant text streaming in
@@ -38,14 +39,15 @@ function Thread({ id, onBack }: { id: string; onBack: () => void }) {
   useEvent("chat", useCallback((ev: any) => {
     if (ev.chat !== id) return;
     if (ev.done) { setMessages((m) => [...m, ev.message]); setPending(null); }
+    else if (ev.reset) setPending("");
     else setPending((p) => (p ?? "") + ev.delta);
   }, [id]));
-  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); }, [messages, pending]);
+  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
 
   return (
     <div className="chat">
-      <button className="link" onClick={onBack}>← All chats</button>
-      {chat?.context && <blockquote className="chat-context">{chat.context}</blockquote>}
+      {onBack && <button className="link" onClick={onBack}>← All chats</button>}
+      {chat?.context && !hideContext && <blockquote className="chat-context">{chat.context}</blockquote>}
       <div className="chat-thread">
         {messages.map((m) => <div key={m.id} className={`msg msg-${m.role}`}>{m.role === "assistant" ? <Markdown body={m.content} /> : m.content}</div>)}
         {pending !== null && <div className="msg msg-assistant">{pending ? <Markdown body={pending} /> : <span className="muted">Thinking…</span>}</div>}

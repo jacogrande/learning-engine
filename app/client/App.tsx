@@ -4,6 +4,7 @@ import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
+import { ReviewPage } from "./Review";
 
 // --- tiny router ---------------------------------------------------------
 function usePath() {
@@ -18,10 +19,10 @@ export const Link = ({ to, children, className }: { to: string; children: ReactN
 
 export function App() {
   const path = usePath();
-  const m = /^\/c\/([^/]+)(?:\/(baseline)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
+  const m = /^\/c\/([^/]+)(?:\/(baseline|review)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
   return (
     <>
-      {!m ? <Courses /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />}
+      {!m ? <Courses /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : m[2] === "review" ? <ReviewPage slug={m[1]} /> : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />}
       <JobBar />
     </>
   );
@@ -103,6 +104,7 @@ function Courses() {
 function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }) {
   const { data: course, error } = useLive<Course>(`/api/courses/${slug}`);
   const { data: state, reload } = useLive<QuizState>(`/api/courses/${slug}/quiz/baseline`);
+  const { data: review } = useLive<{ dueCount: number; total: number }>(`/api/courses/${slug}/review`, ["answer"]);
   if (error) return <Shell crumbs={[{ label: "Courses", to: "/" }, { label: slug }]} className="page"><p>Course not found.</p></Shell>;
   if (!course || !state) return null;
   return (
@@ -114,6 +116,9 @@ function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }
         <Link to={`/c/${slug}/baseline`} className={tab === "baseline" ? "active" : ""}>
           Baseline{state.attempt?.grade ? <span className="level">{state.attempt.grade.level}</span> : null}
         </Link>
+        {review && review.total > 0 && (
+          <Link to={`/c/${slug}/review`}>Review{review.dueCount > 0 ? <span className="level due">{review.dueCount} due</span> : null}</Link>
+        )}
       </nav>
       {tab === "outline" ? <Outline course={course} /> : <Baseline slug={slug} state={state} reload={reload} />}
     </Shell>
@@ -138,14 +143,16 @@ function Outline({ course }: { course: Course }) {
   return (
     <ol className="modules">
       {course.modules.map((m) => {
-        const gen = running(m.id), n = m.sections.length, b = !gen && broken(m.id);
+        const gen = running(m.id), n = m.sections.length, b = !gen && broken(m.id), done = !!m.understanding;
+        const met = m.objectives.filter((o) => o.status === "met").length;
         return (
-          <li key={m.id}>
+          <li key={m.id} className={done ? "is-done" : ""}>
             <div className="module-head">
               <h3>{n ? <Link to={`/c/${course.slug}/m/${m.id}`}>{m.title}</Link> : m.title}</h3>
               <div className="module-actions">
                 {gen && <span className="muted">Generating{n ? ` · ${n} section${n > 1 ? "s" : ""} so far` : "…"}</span>}
-                {n > 0 && <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">Open</Link>}
+                {done && <Link to={`/c/${course.slug}/m/${m.id}/wrap`} className="level">{met}/{m.objectives.length} met</Link>}
+                {n > 0 && <Link to={`/c/${course.slug}/m/${m.id}`} className="btn">{done ? "Reopen" : "Open"}</Link>}
                 {!gen && (n === 0 || b) && (
                   <button onClick={() => post(`/api/courses/${course.slug}/modules/${m.id}/generate`)}>{b ? "Resume" : "Generate"}</button>
                 )}
@@ -153,7 +160,8 @@ function Outline({ course }: { course: Course }) {
             </div>
             {b && <p className="muted note">Last run {b.status}{b.error ? ` — ${b.error}` : ""}.{n > 0 && ` Resume keeps the ${n} section${n === 1 ? "" : "s"} already written.`}</p>}
             {m.summary && <p className="muted">{m.summary}</p>}
-            {m.objectives && <ul className="objectives">{m.objectives.map((o, i) => <li key={i}>{o}</li>)}</ul>}
+            {m.understanding?.summary && <p className="muted">{m.understanding.summary}</p>}
+            <ul className="objectives">{m.objectives.map((o) => <li key={o.id} className={o.status ? `is-${o.status}` : ""}>{o.status && <span className="quiz-status">{o.status}</span>}{o.text}</li>)}</ul>
           </li>
         );
       })}

@@ -4,6 +4,7 @@ import { get, post, useJobs, type Job } from "./api";
 
 const label = (j: Job) => ({
   assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
+  test: `Writing module test ${j.ref?.split("/")[0]}`, wrap: `Wrapping up ${j.ref?.split("/")[0]}`,
   drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying",
 }[j.kind]);
 

@@ -208,6 +208,36 @@ article img, .mermaid svg { max-width: 100%; }
 
 @media (max-width: 1100px) { .pane { display: none; } }
 
+/* phase 3: confidence, wrap-up, review, progress */
+.confidence { display: inline-flex; gap: 2px; padding: 2px; border: 1px solid var(--faint); border-radius: 6px; }
+.confidence button { all: unset; cursor: pointer; padding: 3px 9px; border-radius: 4px; font-size: 12px; color: var(--muted); }
+.confidence button:hover { color: var(--fg); }
+.confidence button[aria-pressed="true"] { color: var(--fg); background: var(--hover); }
+.quiz-explain.hyper { color: var(--fg); border-top: 0; padding-top: 0; font-weight: 500; }
+.side-steps li button.link { display: block; padding: 4px 8px; font-size: 13.5px; color: var(--muted); }
+.side-steps li button.link:hover { color: var(--fg); }
+.side a.is-read::after { content: " ✓"; color: var(--ok); font-size: 11px; }
+.level.due { border-color: var(--bad); color: var(--bad); }
+.tabs a .level { margin-left: 6px; }
+.modules > li.is-done .module-head h3::before { color: var(--ok); }
+.module-actions a.level { text-decoration: none; }
+.objectives li .quiz-status { margin: 0 8px 0 0; }
+.objectives li.is-met .quiz-status { color: var(--ok); } .objectives li.is-unmet .quiz-status { color: var(--bad); }
+.wrap .lede { margin-bottom: 16px; }
+.wrap-objectives { margin: 0 0 24px; }
+.wrap-editor { min-height: 320px; padding: 14px 16px; border: 1px solid var(--faint); border-radius: 8px; font-size: 16px; line-height: 1.65; }
+.wrap-editor:focus-within { border-color: var(--muted); }
+.wrap-summary { margin: 0 0 24px; font-size: 14.5px; color: var(--muted); }
+.wrap-summary summary { cursor: pointer; color: var(--fg); font-size: 13px; text-transform: uppercase; letter-spacing: .08em; }
+.wrap-summary[open] summary { margin-bottom: 8px; }
+.wrap-chat { border: 1px solid var(--faint); border-radius: 8px; padding: 16px 20px; min-height: 40vh; }
+.wrap-chat .chat-thread { overflow: visible; }
+.wrap-chat .msg-assistant { font-size: 15.5px; }
+.objective-status { list-style: none; padding: 0; margin: 12px 0 8px; }
+.objective-status li { display: grid; grid-template-columns: 64px 1fr; gap: 4px 12px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--faint); font-size: 14.5px; }
+.objective-status li small { grid-column: 2; font-size: 12.5px; }
+.objective-status li.is-met .quiz-status { color: var(--ok); } .objective-status li.is-unmet .quiz-status { color: var(--bad); }
+
 /* job bar */
 .jobbar { position: fixed; left: 0; right: 0; bottom: 0; background: var(--bg); border-top: 1px solid var(--faint); font-size: 13px; z-index: 10; }
 .jobbar-row { display: flex; align-items: center; gap: 12px; padding: 8px 20px; cursor: pointer; }
