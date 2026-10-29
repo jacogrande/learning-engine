@@ -87,7 +87,7 @@ function Live({ spec }: { spec: QuizSpec }) {
               {CONFIDENCE.map((c, i) => <button key={c} type="button" aria-pressed={confidence === i + 1} onClick={() => setConfidence(i + 1)}>{c}</button>)}
             </span>
           )}
-          <button onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? "Pick how sure you are first" : undefined}>{grading ? "Grading…" : "Check"}</button>
+          <button className="primary" onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? "Pick how sure you are first" : undefined}>{grading ? "Grading…" : "Check"}</button>
           {spec.type === "short" && grade && !checked && saved && <span className="muted">Edited since last check</span>}
         </div>
       )}

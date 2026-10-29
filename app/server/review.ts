@@ -1,6 +1,6 @@
 // Spaced review. Every question the learner answers becomes an FSRS card; the Review tab serves
 // what is due. "Learned" means three spaced correct recalls (streak >= 3 in the Review state).
-import { fsrs, createEmptyCard, Rating, State, type Card } from "ts-fsrs";
+import { fsrs, createEmptyCard, Rating, State, type Card, type Grade } from "ts-fsrs";
 import YAML from "yaml";
 import { db, now } from "./db";
 import { getDoc } from "./content";
@@ -11,7 +11,7 @@ const scheduler = fsrs({ request_retention: 0.9 });
 export type Result = "correct" | "partial" | "wrong" | "skipped";
 
 // Result + confidence → FSRS rating. A confident correct answer earns Easy; a guess only Good.
-export function rating(result: Result, confidence?: number | null): Rating {
+export function rating(result: Result, confidence?: number | null): Grade {
   if (result === "correct") return confidence === 3 ? Rating.Easy : Rating.Good;
   if (result === "partial") return Rating.Hard;
   return Rating.Again;

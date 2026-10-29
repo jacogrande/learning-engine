@@ -31,8 +31,14 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const [sel, setSel] = useState<Sel | null>(null);
   const [ask, setAsk] = useState<Quote | null>(null);          // drill-down guidance prompt
   const [chatDraft, setChatDraft] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<"nav" | "pane" | null>(null);   // narrow screens: which column is open as a drawer
 
-  useEffect(() => { window.scrollTo(0, 0); setSel(null); }, [current]);
+  useEffect(() => { window.scrollTo(0, 0); setSel(null); setDrawer(null); }, [current]);
+  useEffect(() => {
+    if (!drawer) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
+    document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey);
+  }, [drawer]);
   // Mark a section read when it is opened.
   useEffect(() => {
     if (!current || isWrap || isTest || !mod?.sections.some((s) => s.file === current) || progress?.read?.[current]) return;
@@ -77,11 +83,11 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     const q: Quote = { quote: sel.quote, prefix: sel.prefix, suffix: sel.suffix };
     if (what === "note") {
       post(`/api/courses/${slug}/annotations`, { doc: docPath, ...q }).then(reloadAnnotations);
-      notes.current?.addQuote(q.quote, title); setPane("notes");
+      notes.current?.addQuote(q.quote, title); setPane("notes"); setDrawer("pane");
     }
     if (what === "reading") post(`/api/courses/${slug}/reading`, { doc: docPath, quote: q.quote });
     if (what === "drill") setAsk(q);
-    if (what === "chat") { setChatDraft(q.quote); setPane("chat"); }
+    if (what === "chat") { setChatDraft(q.quote); setPane("chat"); setDrawer("pane"); }
     setSel(null); getSelection()?.removeAllRanges();
   };
 
@@ -91,8 +97,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const tally = testSpecs.reduce((t, id) => { const r = saved[id]?.result; if (r) t[r] = (t[r] ?? 0) + 1; return t; }, {} as Record<string, number>);
 
   return (
-    <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title, to: `/c/${slug}` }, { label: mod.title }]} className="reader">
-      <nav className="side">
+    <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title, to: `/c/${slug}` }, { label: mod.title }]} className={`reader ${drawer ? `drawer-${drawer}` : ""}`}>
+      <nav className="side" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) setDrawer(null); }}>
         <div className="side-title">{mod.title}</div>
         <ul>
           {sections.map((s) => {
@@ -120,6 +126,12 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
       </nav>
 
       <main className="content">
+        <div className="reader-tools">
+          <button className="nav-toggle" onClick={() => setDrawer("nav")}>Contents</button>
+          <span className="spacer" />
+          <button onClick={() => { setPane("notes"); setDrawer("pane"); }}>Notes</button>
+          <button onClick={() => { setPane("chat"); setDrawer("pane"); }}>Chat</button>
+        </div>
         {isWrap ? <Wrap slug={slug} course={course} mod={mod} /> : doc && (
           <article ref={article}>
             <p className="kicker">
@@ -140,8 +152,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             </QuizGrade>
             <footer className="article-foot">
               {isSection && prev ? <Link to={`${here}/${prev.file}`} className="btn">← {prev.title}</Link> : isTest && sections.at(-1) ? <Link to={`${here}/${sections.at(-1)!.file}`} className="btn">← {sections.at(-1)!.title}</Link> : <span />}
-              {isSection ? (next ? <Link to={`${here}/${next.file}`} className="btn">{next.title} →</Link> : <Link to={afterSections.to} className="btn">{afterSections.label} →</Link>)
-               : isTest ? <Link to={`${here}/wrap`} className="btn">Wrap up →</Link>
+              {isSection ? (next ? <Link to={`${here}/${next.file}`} className="btn primary">{next.title} →</Link> : <Link to={afterSections.to} className="btn primary">{afterSections.label} →</Link>)
+               : isTest ? <Link to={`${here}/wrap`} className="btn primary">Wrap up →</Link>
                : extra?.section ? <Link to={`${here}/${extra.section}`} className="btn">Back to “{sourceTitle}” →</Link> : null}
             </footer>
           </article>
@@ -163,10 +175,12 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
         )}
       </main>
 
+      <div className="scrim" onClick={() => setDrawer(null)} />
       <aside className="pane">
         <div className="pane-tabs">
           <button aria-pressed={pane === "notes"} onClick={() => setPane("notes")}>Notes</button>
           <button aria-pressed={pane === "chat"} onClick={() => setPane("chat")}>Chat</button>
+          <button className="pane-close" aria-label="Close" onClick={() => setDrawer(null)}>×</button>
         </div>
         <div className="pane-body" hidden={pane !== "notes"}>
           {annotations && annotations.length > 0 && (

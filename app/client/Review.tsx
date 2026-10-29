@@ -41,7 +41,7 @@ export function ReviewPage({ slug }: { slug: string }) {
         <p className="muted empty">Nothing due. {due.total} question{due.total === 1 ? "" : "s"} scheduled{due.next ? `; next on ${new Date(due.next).toLocaleDateString()}` : ""}. <Link to={`/c/${slug}`}>Back to the outline →</Link></p>
       ) : item ? (
         <>
-          <p className="muted">{i + 1} of {due.items.length} due · from <Link to={`/c/${slug}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`}>{modTitle(item.module)}</Link>{item.streak > 0 ? ` · ${item.streak} correct in a row` : ""}</p>
+          <p className="meta">{i + 1} of {due.items.length} due · from <Link to={`/c/${slug}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`}>{modTitle(item.module)}</Link>{item.streak > 0 ? ` · ${item.streak} correct in a row` : ""}</p>
           <QuizGrade value={{ saved, submit }}>
             <Quiz key={item.question} spec={item.spec} />
           </QuizGrade>

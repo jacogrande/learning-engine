@@ -57,7 +57,7 @@ function Sync() {
   const ago = (iso: string | null) => { if (!iso) return "never"; const m = Math.round((Date.now() - +new Date(iso)) / 60_000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`; };
   const label = !s.remote ? "local only" : s.busy ? `${s.busy}…` : s.error ? "sync error" : s.dirty ? "unsaved changes" : `synced ${ago(s.lastPush ?? s.lastPull)}`;
   return (
-    <button className={`sync ${s.error ? "is-error" : ""}`} title={s.error ?? (s.remote ? `${s.remote}\nclick to sync now` : "No remote configured for the library")} onClick={() => post("/api/sync")} disabled={!!s.busy}>
+    <button className={`sync ${s.error ? "is-error" : s.remote && !s.dirty && !s.busy ? "is-synced" : ""}`} title={s.error ?? (s.remote ? `${s.remote}\nclick to sync now` : "No remote configured for the library")} onClick={() => post("/api/sync")} disabled={!!s.busy}>
       <span className={`dot ${s.busy ? "pulse" : ""}`} />{label}
     </button>
   );
@@ -183,7 +183,7 @@ function Baseline({ slug, state, reload }: { slug: string; state: QuizState; rel
   const results = Object.fromEntries((attempt.grade?.questions ?? []).map((q) => [q.id, q]));
   return (
     <>
-      <p className="muted">Taken {new Date(attempt.createdAt).toLocaleString()}</p>
+      <p className="meta">Taken {new Date(attempt.createdAt).toLocaleString()}</p>
       {attempt.grade ? (
         <Analysis grade={attempt.grade} />
       ) : (
