@@ -50,8 +50,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, async () => {
     for (const lane of ["heavy", "light"] as Lane[]) {
       const c = current[lane];
-      if (c) { killTree(c.child); finish(c.job, "interrupted"); }
-      for (const j of queues[lane]) finish(j, "interrupted");
+      if (c) { killTree(c.child); finish(c.job, "interrupted"); c.job._opts.fail?.(c.job); }
+      for (const j of queues[lane]) { finish(j, "interrupted"); j._opts.fail?.(j); }
     }
     await Promise.race([flush(), new Promise((r) => setTimeout(r, 8000))]);   // push pending state, briefly
     process.exit(0);
@@ -141,10 +141,17 @@ function pump(lane: Lane) {
     }
   });
   child.stderr!.on("data", (c) => log(job.id, `! ${c.toString().trim()}`));
+  child.on("error", (e) => {   // e.g. `claude` not on PATH: fail the job, never the server
+    log(job.id, `! spawn: ${e.message}`);
+    current[lane] = null;
+    if (job.status === "running") { finish(job, "failed", { error: e.message }); o.fail?.(job); }
+    pump(lane);
+  });
   child.on("close", (code) => {
+    if (!current[lane] || current[lane]!.job !== job) return;   // already handled by 'error'
     current[lane] = null;
     if (job.status === "running") {
-      if (cancelled.delete(job.id) || code === null) finish(job, "cancelled");
+      if (cancelled.delete(job.id) || code === null) { finish(job, "cancelled"); o.fail?.(job); }
       else if (code === 0 && !job.error) { finish(job, "done"); o.then?.(job.result, job); }
       else { finish(job, "failed", { error: job.error ?? `exit ${code}` }); o.fail?.(job); }
     }
@@ -184,7 +191,7 @@ function describe(tool: string, input: any): string {
     case "Read": return `reading ${rel(input.file_path)}`;
     case "Agent": return `research: ${input.description ?? input.subagent_type}`;
     case "WebSearch": return `searching: ${input.query}`;
-    case "WebFetch": return `fetching ${new URL(input.url).hostname}`;
+    case "WebFetch": { try { return `fetching ${new URL(input.url).hostname}`; } catch { return `fetching ${String(input.url).slice(0, 60)}`; } }
     default: return tool.toLowerCase();
   }
 }

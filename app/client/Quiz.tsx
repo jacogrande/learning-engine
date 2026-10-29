@@ -1,7 +1,7 @@
 // A single question. Three modes: form (baseline; a parent collects answers), review (read-only
 // with the grader's note), and live (in a lesson; answers persist, short ones are graded, and a
 // confidence rating is taken before feedback — calibration is part of what the course measures).
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import type { Answer, Result } from "./api";
 
@@ -55,6 +55,11 @@ function Live({ spec }: { spec: QuizSpec }) {
   const [value, setValue] = useState(saved?.answer ?? "");
   const [confidence, setConfidence] = useState<number>(saved?.confidence ?? 0);
   const [checked, setChecked] = useState(!!saved);
+  // Answers can arrive after the lesson renders; adopt them unless the learner has typed something new.
+  useEffect(() => {
+    if (!saved || (value !== "" && value !== saved.answer)) return;
+    setValue(saved.answer); setConfidence(saved.confidence ?? 0); setChecked(true);
+  }, [saved?.answer, saved?.result, saved?.note]);
   const v = form ? form.answers[spec.id] ?? "" : value;
   const set = (x: string) => { form ? form.set(spec.id, x) : setValue(x); setChecked(false); };
 

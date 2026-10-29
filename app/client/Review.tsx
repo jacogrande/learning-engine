@@ -1,5 +1,5 @@
 // Spaced review: due questions from anywhere in the course, one at a time, graded like a lesson.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, useLive, type Answer, type Course } from "./api";
 import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell } from "./App";
@@ -23,10 +23,14 @@ export function ReviewPage({ slug }: { slug: string }) {
       if (spec.type === "short") poll(spec.id, item.doc);
     });
   }, [item, slug]);
+  const timer = useRef<ReturnType<typeof setInterval>>(undefined);
+  useEffect(() => () => clearInterval(timer.current), []);
   const poll = (qid: string, doc: string) => {
-    const t = setInterval(() => get<Answer[]>(`/api/courses/${slug}/answers?doc=${doc}`).then((as) => {
+    clearInterval(timer.current);
+    let tries = 0;
+    timer.current = setInterval(() => get<Answer[]>(`/api/courses/${slug}/answers?doc=${doc}`).then((as) => {
       const a = as.find((x) => x.question === qid);
-      if (a?.note) { clearInterval(t); setSaved((s) => ({ ...s, [qid]: a })); }
+      if (a?.note || ++tries > 80) { clearInterval(timer.current); if (a?.note) setSaved((s) => ({ ...s, [qid]: a })); }
     }), 1500);
   };
 

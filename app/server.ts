@@ -72,7 +72,9 @@ function sendChat(chat: any, content: string, record = true) {
   if (chat.session_id) prompt = content;
   else {
     // New session. On a machine that has no handle for an old chat, replay the transcript so far.
-    const prior = (db.query("SELECT role, content FROM messages WHERE chat=? AND id<>? ORDER BY created_at").all(chat.id, mid) as any[]);
+    // Exclude the message being sent (recorded under `mid`, or, on a retry, the latest user row).
+    const skip = record ? mid : ((db.query("SELECT id FROM messages WHERE chat=? AND role='user' ORDER BY created_at DESC LIMIT 1").get(chat.id) as any)?.id ?? "");
+    const prior = (db.query("SELECT role, content FROM messages WHERE chat=? AND id<>? ORDER BY created_at").all(chat.id, skip) as any[]);
     const transcript = prior.length ? `Conversation so far:\n${prior.map((m) => `${m.role === "user" ? "Learner" : "You"}: ${m.content}`).join("\n\n")}\n\n` : "";
     prompt = `${opener}${transcript}${chat.kind === "summary" && !prior.length ? "Learner's explanation of the module:\n" : "Learner: "}${content}`;
   }
@@ -90,7 +92,12 @@ function sendChat(chat: any, content: string, record = true) {
     },
     fail: () => {
       // A resumed session that no longer exists here (other machine, pruned): retry fresh once.
-      if (!chat.session_id) return broadcast({ type: "chat", chat: chat.id, done: true, message: { id: id(), role: "assistant", content: "_Reply failed. Try again._" } });
+      if (!chat.session_id) {
+        const aid = id(), content = "_No reply came back. Send your message again._";
+        db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [aid, chat.id, "assistant", content, now()]);
+        state.chat(chat.id);
+        return broadcast({ type: "chat", chat: chat.id, done: true, message: { id: aid, role: "assistant", content } });
+      }
       db.run("UPDATE chats SET session_id=NULL WHERE id=?", [chat.id]);
       sendChat({ ...chat, session_id: null }, content, false);
     },
@@ -106,11 +113,12 @@ function progressOf(course: string, mod: string) {
   const r = db.query("SELECT data FROM progress WHERE course=? AND module=?").get(course, mod) as any;
   return r ? JSON.parse(r.data) : {};
 }
-function saveProgress(course: string, mod: string, patch: Record<string, unknown>) {
-  const next = { ...progressOf(course, mod), ...patch };
+function saveProgress(course: string, mod: string, patch: Record<string, any>) {
+  const prev = progressOf(course, mod);
+  const next = { ...prev, ...patch, ...(patch.read ? { read: { ...(prev.read ?? {}), ...patch.read } } : {}) };
   db.run("INSERT INTO progress (course, module, data, updated_at) VALUES (?,?,?,?) ON CONFLICT(course, module) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at", [course, mod, JSON.stringify(next), now()]);
   state.progress(course, mod);
-  broadcast({ type: "content" });
+  broadcast({ type: "progress", course, module: mod });
   return next;
 }
 // Everything the wrap-up judges from: the explanation, the discussion, every answer with its
@@ -187,11 +195,14 @@ Bun.serve({
         const slug = req.params.slug;
         const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
         let job: string | null = null;
+        const jobRef = { id: "" };
         if (type === "short") {
-          job = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
+          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
             ref: qid, schema: GRADE_SCHEMA,
             then: (g: any) => {
-              db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=?", [g.result, g.note, now(), slug, qid]);
+              // Only if this is still the answer the job graded (the learner may have re-checked since).
+              const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobRef.id]);
+              if (!r.changes) return;
               state.answer(slug, qid);
               rate(slug, qid, doc, g.result, confidence);
               broadcast({ type: "answer", course: slug, doc, question: qid });

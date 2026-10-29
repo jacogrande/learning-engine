@@ -39,7 +39,7 @@ function Mermaid({ src }: { src: string }) {
 function Fence({ lang, code, children }: { lang: string; code: string; children: ReactNode }) {
   if (lang === "mermaid") return <Mermaid src={code} />;
   if (lang === "quiz") {
-    try { return <Quiz spec={YAML.parse(code) as QuizSpec} />; }
+    try { const spec = YAML.parse(code) as QuizSpec; return <Quiz key={spec.id} spec={spec} />; }
     catch { return <pre className="block-error">{code}</pre>; }
   }
   return <pre><code>{children}</code></pre>;

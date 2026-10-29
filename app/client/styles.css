@@ -16,7 +16,6 @@
   --accent: #4d7c00;         /* chartreuse, deepened for text and lines (5:1 on white) */
   --accent-fill: #b4f000;    /* chartreuse at full strength: buttons, highlights */
   --accent-fg: #14200a;      /* text on an accent fill */
-  --accent-tint: var(--hover);           /* selected surfaces stay neutral; the accent is the rule beside them */
   --accent-soft: var(--accent-fill);
   --highlight: var(--accent-fill);        /* used as an underline mark, not a fill */
   --scrim: rgba(0, 0, 0, .32);
@@ -59,14 +58,12 @@
   --bg: #121212; --fg: #e8e8e8; --muted: #9a9a9a; --faint: #2a2a2a; --line-strong: #3d3d3d;
   --hover: #1e1e1e; --code: #1a1a1a; --ok: #4cbf63; --bad: #e2655a;
   --accent: #b9ef4a; --accent-fill: #a8e62a; --accent-fg: #121212;
-  --accent-tint: var(--hover);
   --scrim: rgba(0, 0, 0, .55); --shadow: 0 8px 24px rgba(0, 0, 0, .5); color-scheme: dark;
 } }
 :root[data-theme="dark"] {
   --bg: #121212; --fg: #e8e8e8; --muted: #9a9a9a; --faint: #2a2a2a; --line-strong: #3d3d3d;
   --hover: #1e1e1e; --code: #1a1a1a; --ok: #4cbf63; --bad: #e2655a;
   --accent: #b9ef4a; --accent-fill: #a8e62a; --accent-fg: #121212;
-  --accent-tint: var(--hover);
   --scrim: rgba(0, 0, 0, .55); --shadow: 0 8px 24px rgba(0, 0, 0, .5); color-scheme: dark;
 }
 
@@ -279,7 +276,6 @@ article img, .mermaid svg { max-width: 100%; }
 .level.due { border-color: var(--bad); color: var(--bad); }
 .analysis { margin: var(--s-4) 0 var(--s-7); padding: var(--s-5); background: var(--code); border-radius: var(--radius-3); }
 .analysis-head { display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); font-size: var(--fs-small); margin-bottom: var(--s-3); }
-.analysis .level { background: var(--bg); }
 .analysis p { margin: 0 0 var(--s-4); }
 .analysis > :last-child { margin-bottom: 0; }
 .analysis-cols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-6); font-size: var(--fs-ui); line-height: var(--lh-ui); }

@@ -44,7 +44,7 @@ export const pull = () => serial(async () => {
   status.busy = "pulling"; status.error = null; emit();
   const r = await git(["pull", "--rebase", "--autostash", "-q"]);
   if (!r.ok) { await git(["rebase", "--abort"]); status.error = `pull: ${r.out.split("\n").pop()}`; }
-  else { status.lastPull = new Date().toISOString(); onPulled(); }
+  else { status.lastPull = new Date().toISOString(); try { onPulled(); } catch (e) { status.error = `rebuild: ${(e as Error).message}`; } }
   status.busy = null; emit();
 });
 
@@ -66,7 +66,7 @@ async function pushNow() {
   let r = await git(["push", "-q"]);
   if (!r.ok) {   // behind the remote: integrate, then try once more
     const p = await git(["pull", "--rebase", "--autostash", "-q"]);
-    if (!p.ok) await git(["rebase", "--abort"]); else onPulled();
+    if (!p.ok) await git(["rebase", "--abort"]); else try { onPulled(); } catch (e) { status.error = `rebuild: ${(e as Error).message}`; }
     r = await git(["push", "-q"]);
   }
   if (r.ok) status.lastPush = new Date().toISOString();

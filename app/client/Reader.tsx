@@ -22,7 +22,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const { data: doc } = useLive<Doc>(docPath && mod ? `/api/courses/${slug}/doc?path=${docPath}` : null);
   const { data: answers, reload: reloadAnswers } = useLive<Answer[]>(docPath ? `/api/courses/${slug}/answers?doc=${docPath}` : null, ["answer"]);
   const { data: annotations, reload: reloadAnnotations } = useLive<Annotation[]>(docPath ? `/api/courses/${slug}/annotations?doc=${docPath}` : null);
-  const { data: progress } = useLive<{ read?: Record<string, string>; completedAt?: string }>(`/api/courses/${slug}/progress/${moduleId}`);
+  const { data: progress } = useLive<{ read?: Record<string, string>; completedAt?: string }>(`/api/courses/${slug}/progress/${moduleId}`, ["progress"]);
   const jobs = useJobs();
 
   const article = useRef<HTMLElement>(null);
@@ -53,8 +53,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   }, [drawer]);
   // Mark a section read when it is opened.
   useEffect(() => {
-    if (!current || isWrap || isTest || !mod?.sections.some((s) => s.file === current) || progress?.read?.[current]) return;
-    put(`/api/courses/${slug}/progress/${moduleId}`, { read: { ...(progress?.read ?? {}), [current]: new Date().toISOString() } });
+    if (!progress || !current || isWrap || isTest || !mod?.sections.some((s) => s.file === current) || progress.read?.[current]) return;
+    put(`/api/courses/${slug}/progress/${moduleId}`, { read: { [current]: new Date().toISOString() } });   // the server merges `read`
   }, [current, progress]);
 
   // Selection menu: appears above any selection inside the article.
@@ -104,7 +104,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   };
 
   // Test score, once every question has an answer.
-  const testSpecs = isTest && doc ? [...doc.body.matchAll(/```quiz\n[\s\S]*?\nid:\s*(\S+)/g)].map((m) => m[1]) : [];
+  const testSpecs = isTest && doc ? [...doc.body.matchAll(/```quiz\n([\s\S]*?)```/g)].map((m) => /^id:\s*(\S+)/m.exec(m[1])?.[1]).filter((x): x is string => !!x) : [];
   const testDone = testSpecs.length > 0 && testSpecs.every((id) => saved[id]?.result);
   const tally = testSpecs.reduce((t, id) => { const r = saved[id]?.result; if (r) t[r] = (t[r] ?? 0) + 1; return t; }, {} as Record<string, number>);
 

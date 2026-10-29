@@ -46,13 +46,14 @@ export function useEvent(type: string, fn: Listener) {
 
 // Fetch + refetch whenever content changes on disk (or a job finishes).
 export function useLive<T>(url: string | null, also: string[] = []) {
-  const [data, setData] = useState<T | null>(null);
+  const [state, setState] = useState<{ url: string | null; data: T | null }>({ url: null, data: null });
   const [error, setError] = useState<number | null>(null);
-  const load = useCallback(() => { if (url) get<T>(url).then(setData, setError); else setData(null); }, [url]);
+  const load = useCallback(() => { if (url) get<T>(url).then((data) => setState({ url, data }), setError); else setState({ url: null, data: null }); }, [url]);
   useEffect(load, [load]);
   useEvent("content", load);
   useEvent(also[0] ?? "none", load);
-  return { data, error, reload: load };
+  // Never hand back data fetched for a previous url (navigating between modules reuses this hook).
+  return { data: state.url === url ? state.data : null, error, reload: load };
 }
 
 export function useJobs() {

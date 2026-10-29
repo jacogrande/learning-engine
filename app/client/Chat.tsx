@@ -1,6 +1,6 @@
 // Chats scoped to one section. A new chat starts from a selection (its context) or from nothing.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { get, post, useEvent, useLive, type Chat as ChatRow, type Message } from "./api";
+import { get, post, useEvent, useLive, useJobs, type Chat as ChatRow, type Message } from "./api";
 import { Markdown } from "./Markdown";
 
 export function ChatPane({ slug, doc, draft, onDraftUsed }: { slug: string; doc: string; draft: string | null; onDraftUsed: () => void }) {
@@ -34,8 +34,12 @@ export function Thread({ id, onBack, onTurns, hideContext }: { id: string; onBac
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<string | null>(null);   // assistant text streaming in
   const end = useRef<HTMLDivElement>(null);
+  const jobs = useJobs();
+  const replying = jobs.some((j) => j.kind === "chat" && j.ref === id);
 
-  useEffect(() => { get<{ chat: ChatRow; messages: Message[] }>(`/api/chats/${id}`).then((r) => { setChat(r.chat); setMessages(r.messages); setPending(r.messages.at(-1)?.role === "user" ? "" : null); }); }, [id]);
+  useEffect(() => { get<{ chat: ChatRow; messages: Message[] }>(`/api/chats/${id}`).then((r) => { setChat(r.chat); setMessages(r.messages); setPending(null); }); }, [id]);
+  // Waiting only while a reply job exists; a thread that ends on a user turn with no job is sendable again.
+  useEffect(() => { if (!replying) setPending((p) => (p ? p : null)); else setPending((p) => p ?? ""); }, [replying]);
   useEvent("chat", useCallback((ev: any) => {
     if (ev.chat !== id) return;
     if (ev.done) { setMessages((m) => [...m, ev.message]); setPending(null); }

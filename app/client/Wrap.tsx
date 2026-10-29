@@ -11,7 +11,7 @@ type Progress = { summary?: string; chat?: string; discussedAt?: string; complet
 
 export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod: Module }) {
   const url = `/api/courses/${slug}/progress/${mod.id}`;
-  const { data: p, reload } = useLive<Progress>(url);
+  const { data: p, reload } = useLive<Progress>(url, ["progress"]);
   const jobs = useJobs();
   const wrapping = jobs.some((j) => j.course === slug && j.kind === "wrap" && j.ref === `${mod.id}/wrap`);
   const [turns, setTurns] = useState(0);
