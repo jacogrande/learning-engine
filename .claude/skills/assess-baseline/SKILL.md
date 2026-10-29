@@ -8,9 +8,9 @@ disable-model-invocation: true
 
 Course slug: $ARGUMENTS. The learner's answers follow in this message as JSON (question id → answer; mcq answers are 0-based option indexes as strings).
 
-1. Read `content/courses/<slug>/course.md`, `quizzes/baseline.md`, and `research/map.md`.
+1. Read `library/content/courses/<slug>/course.md`, `quizzes/baseline.md`, and `research/map.md`.
 2. Grade each answer. For `mcq`, compare to `answer`. For `short`, judge against `rubric` — partial credit is fine; note precisely what was present and what was missing. Unanswered questions count as gaps, not errors.
-3. Write `content/courses/<slug>/quizzes/baseline-assessment.md`:
+3. Write `library/content/courses/<slug>/quizzes/baseline-assessment.md`:
 
 ```markdown
 ---

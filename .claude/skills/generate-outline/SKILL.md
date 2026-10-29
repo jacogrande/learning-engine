@@ -10,7 +10,7 @@ Course slug: $ARGUMENTS.
 
 1. Read `course.md`, `research/map.md`, every file in `research/`, and `quizzes/baseline-assessment.md`.
 2. Plan 4–8 modules. Backward design: start from what the learner said they want to *do* (course goals), decide what each module must leave them able to do, order by dependency. Use the assessment to skip or compress what they already have and to put extra weight where gaps showed. Stay at module level — do not list sections or write content.
-3. Write `content/courses/<slug>/outline.md`:
+3. Write `library/content/courses/<slug>/outline.md`:
 
 ```markdown
 ---

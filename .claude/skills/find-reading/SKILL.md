@@ -10,7 +10,7 @@ Arguments: $ARGUMENTS — course slug and the section file (course-relative, `mo
 
 1. Read the section and `research/map.md` (its sources list is your starting point). Read `quizzes/baseline-assessment.md` for the learner's level. List existing files in `modules/<id>/readings/`.
 2. Search for 5–8 sources that go further on exactly what the passage says: the primary text an idea comes from, the best modern treatment, one accessible article, one that argues against it if a serious critique exists. Verify each exists; prefer sources with a URL or a well-known book.
-3. Write `content/courses/<slug>/modules/<id>/readings/<nn>-<short-slug>.md`, `nn` continuing from existing files:
+3. Write `library/content/courses/<slug>/modules/<id>/readings/<nn>-<short-slug>.md`, `nn` continuing from existing files:
 
 ```markdown
 ---

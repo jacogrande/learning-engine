@@ -16,11 +16,11 @@ Read `course.md`, `outline.md` (find this module's objectives), `quizzes/baselin
 
 ## 2. Research in depth
 
-Split the module's objectives into 2–3 research briefs. Launch one `module-researcher` subagent per brief, **in parallel**, each writing to `content/courses/<slug>/modules/<id>/research/<brief>.md`. Each brief lists the exact objectives it owns and says explicitly what is out of scope. Wait for all.
+Split the module's objectives into 2–3 research briefs. Launch one `module-researcher` subagent per brief, **in parallel**, each writing to `library/content/courses/<slug>/modules/<id>/research/<brief>.md`. Each brief lists the exact objectives it owns and says explicitly what is out of scope. Wait for all.
 
 ## 3. Write the sections
 
-Write 3–6 section files at `content/courses/<slug>/modules/<id>/NN-<slug>.md`, `NN` zero-padded in reading order. Each file:
+Write 3–6 section files at `library/content/courses/<slug>/modules/<id>/NN-<slug>.md`, `NN` zero-padded in reading order. Each file:
 
 - Frontmatter: `title`, `order`.
 - Opens with the objective it serves, as one line in a `:::callout{type=note}`: "After this section you can …".

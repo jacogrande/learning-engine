@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade, type Job } from "./api";
+import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade, type Job, type SyncStatus } from "./api";
 import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
@@ -40,10 +40,25 @@ export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; childr
             <span key={i}><span className="sep">/</span>{c.to ? <Link to={c.to}>{c.label}</Link> : <span className="current">{c.label}</span>}</span>
           ))}
         </nav>
-        <Theme />
+        <div className="top-right"><Sync /><Theme /></div>
       </header>
       <div className={className}>{children}</div>
     </>
+  );
+}
+
+// Library sync state. Click to pull and push now.
+function Sync() {
+  const { data: s } = useLive<SyncStatus>("/api/sync", ["sync"]);
+  const [, tick] = useState(0);
+  useEffect(() => { const t = setInterval(() => tick((n) => n + 1), 30_000); return () => clearInterval(t); }, []);
+  if (!s?.repo) return null;
+  const ago = (iso: string | null) => { if (!iso) return "never"; const m = Math.round((Date.now() - +new Date(iso)) / 60_000); return m < 1 ? "just now" : m < 60 ? `${m}m ago` : `${Math.round(m / 60)}h ago`; };
+  const label = !s.remote ? "local only" : s.busy ? `${s.busy}…` : s.error ? "sync error" : s.dirty ? "unsaved changes" : `synced ${ago(s.lastPush ?? s.lastPull)}`;
+  return (
+    <button className={`sync ${s.error ? "is-error" : ""}`} title={s.error ?? (s.remote ? `${s.remote}\nclick to sync now` : "No remote configured for the library")} onClick={() => post("/api/sync")} disabled={!!s.busy}>
+      <span className={`dot ${s.busy ? "pulse" : ""}`} />{label}
+    </button>
   );
 }
 

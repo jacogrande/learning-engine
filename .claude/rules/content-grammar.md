@@ -1,6 +1,6 @@
 # Content grammar
 
-Every file you write under `content/courses/` is Markdown that the app renders. The app has a fixed set of components; you never write HTML or JSX. A malformed block renders as an error card, so follow the grammar exactly.
+Every file you write under `library/content/courses/` is Markdown that the app renders. The app has a fixed set of components; you never write HTML or JSX. A malformed block renders as an error card, so follow the grammar exactly.
 
 ## Frontmatter
 

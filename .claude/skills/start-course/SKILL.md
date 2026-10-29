@@ -12,17 +12,17 @@ Subject: $ARGUMENTS
 
 Ask the learner, in one round, what you need to plan well. Typically: target depth (entry level / working practitioner / expert), what they already know or have done, what they want to be able to *do* afterward, and any angle to emphasize or avoid. Skip questions the subject line already answers.
 
-Pick a short kebab-case slug for the course directory. Stop and ask if `content/courses/<slug>/` already exists.
+Pick a short kebab-case slug for the course directory. Stop and ask if `library/content/courses/<slug>/` already exists.
 
 ## 2. Research the breadth
 
-Identify 3–5 facets that together cover the subject at the chosen depth. Launch one `topic-researcher` subagent per facet, **in parallel**, each writing to `content/courses/<slug>/research/<facet>.md`. Wait for all of them.
+Identify 3–5 facets that together cover the subject at the chosen depth. Launch one `topic-researcher` subagent per facet, **in parallel**, each writing to `library/content/courses/<slug>/research/<facet>.md`. Wait for all of them.
 
 Then write `research/map.md`: the territory in one page — the main talking points, how facets relate, which ideas are foundational vs. advanced, and the misconceptions worth testing. This is the planning document later skills read.
 
 ## 3. Scaffold
 
-Write `content/courses/<slug>/course.md`:
+Write `library/content/courses/<slug>/course.md`:
 
 ```markdown
 ---
@@ -36,7 +36,7 @@ goals:
 
 ## 4. Baseline test
 
-Write `content/courses/<slug>/quizzes/baseline.md`. Frontmatter `title: Baseline`. Then 8–12 `quiz` blocks (see the content grammar), ids `q-base-01`…:
+Write `library/content/courses/<slug>/quizzes/baseline.md`. Frontmatter `title: Baseline`. Then 8–12 `quiz` blocks (see the content grammar), ids `q-base-01`…:
 
 - Cover each facet; span easy → hard so the result discriminates.
 - Mix: roughly half `mcq` with distractors drawn from the misconceptions in `research/map.md`, half `short` asking the learner to explain or apply.

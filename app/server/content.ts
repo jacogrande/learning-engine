@@ -4,7 +4,12 @@ import { join, resolve, basename } from "node:path";
 import YAML from "yaml";
 
 export const ROOT = resolve(import.meta.dir, "../..");
-export const COURSES_DIR = join(ROOT, "content/courses");
+// The library is the user's data: courses, notes, state. Its own git repo; the app never commits it
+// as part of itself. `library/` inside the app dir is the default; LEARNING_DIR points elsewhere.
+export const LIBRARY = resolve(process.env.LEARNING_DIR ?? join(ROOT, "library"));
+export const COURSES_DIR = join(LIBRARY, "content/courses");
+export const NOTES_DIR = join(LIBRARY, "notes");
+export const STATE_DIR = join(LIBRARY, "state");
 
 export type Doc = { frontmatter: Record<string, any>; body: string };
 

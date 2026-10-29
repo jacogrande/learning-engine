@@ -25,7 +25,7 @@ let timer: ReturnType<typeof setTimeout> | undefined;
 export function watchContent() {
   try {
     watch(COURSES_DIR, { recursive: true }, (_e, file) => {
-      if (!file || /\.tmp\./.test(String(file))) return;
+      if (!file || /\.tmp\.|\.git\//.test(String(file))) return;
       clearTimeout(timer);
       timer = setTimeout(() => broadcast({ type: "content" }), 300);
     });

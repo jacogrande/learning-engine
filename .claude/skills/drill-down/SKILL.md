@@ -11,7 +11,7 @@ Arguments: $ARGUMENTS — course slug and the section file (course-relative, `mo
 1. Read the section so you know what was already said. Read `quizzes/baseline-assessment.md` for the learner's level. List any existing files in `modules/<id>/drilldowns/` so you do not repeat one.
 2. Decide what "deeper" means here: the mechanism behind the claim, the evidence for it, the edge cases, a worked example at length, the history of the idea, or the strongest objection to it. The learner's guidance, if any, decides. Otherwise pick the one that most changes how they would use the idea.
 3. Research it. Use one `module-researcher` subagent if the topic needs sources; search directly if it is small. Scope is the passage, not the section.
-4. Write `content/courses/<slug>/modules/<id>/drilldowns/<nn>-<short-slug>.md`, `nn` continuing from existing files (start at 01):
+4. Write `library/content/courses/<slug>/modules/<id>/drilldowns/<nn>-<short-slug>.md`, `nn` continuing from existing files (start at 01):
 
 ```markdown
 ---

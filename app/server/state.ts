@@ -1,0 +1,92 @@
+// User state is files-first: one JSON per answer, highlight, chat and attempt under library/state/,
+// which git syncs between machines. SQLite is an index rebuilt from those files on boot and after
+// every pull. Drafts, jobs and chat session handles stay local-only.
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync, existsSync, statSync } from "node:fs";
+import { join, dirname } from "node:path";
+import { db } from "./db";
+import { STATE_DIR } from "./content";
+import { touch } from "./sync";
+
+const file = (...p: string[]) => join(STATE_DIR, ...p) + ".json";
+
+function save(path: string, obj: unknown) {
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, JSON.stringify(obj, null, 2) + "\n");
+  touch();
+}
+function remove(path: string) { rmSync(path, { force: true }); touch(); }
+
+function* walk(dir: string): Generator<string> {
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir)) {
+    const p = join(dir, name);
+    if (statSync(p).isDirectory()) yield* walk(p);
+    else if (name.endsWith(".json")) yield p;
+  }
+}
+const load = (p: string) => { try { return JSON.parse(readFileSync(p, "utf8")); } catch { return null; } };
+
+// --- writers: called by the API after each DB write -----------------------
+export const state = {
+  answer: (course: string, question: string) => {
+    const r = db.query("SELECT course, question, doc, answer, result, note, updated_at updatedAt, graded_at gradedAt FROM answers WHERE course=? AND question=?").get(course, question);
+    if (r) save(file("answers", course, question), r);
+  },
+  annotation: (id: string) => {
+    const r = db.query("SELECT id, course, doc, quote, prefix, suffix, created_at createdAt FROM annotations WHERE id=?").get(id);
+    if (r) save(file("annotations", id), r);
+  },
+  annotationDeleted: (id: string) => remove(file("annotations", id)),
+  chat: (id: string) => {
+    const c = db.query("SELECT id, course, doc, context, title, created_at createdAt, updated_at updatedAt FROM chats WHERE id=?").get(id) as any;
+    if (!c) return;
+    c.messages = db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(id);
+    save(file("chats", id), c);
+  },
+  attempt: (id: string) => {
+    const r = db.query("SELECT id, course, quiz, answers, grade, created_at createdAt FROM attempts WHERE id=?").get(id) as any;
+    if (r) save(file("attempts", r.course, id), { ...r, answers: JSON.parse(r.answers), grade: r.grade ? JSON.parse(r.grade) : null });
+  },
+};
+
+// --- rebuild: files → SQLite ----------------------------------------------
+export function rebuild() {
+  const run = db.transaction(() => {
+    db.run("DELETE FROM answers"); db.run("DELETE FROM annotations"); db.run("DELETE FROM attempts");
+    for (const p of walk(join(STATE_DIR, "answers"))) {
+      const r = load(p); if (!r) continue;
+      db.run("INSERT OR REPLACE INTO answers (course, question, doc, answer, result, note, job, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?)",
+        [r.course, r.question, r.doc, r.answer, r.result ?? null, r.note ?? null, null, r.updatedAt, r.gradedAt ?? null]);
+    }
+    for (const p of walk(join(STATE_DIR, "annotations"))) {
+      const r = load(p); if (!r) continue;
+      db.run("INSERT OR REPLACE INTO annotations (id, course, doc, quote, prefix, suffix, created_at) VALUES (?,?,?,?,?,?,?)", [r.id, r.course, r.doc, r.quote, r.prefix ?? "", r.suffix ?? "", r.createdAt]);
+    }
+    for (const p of walk(join(STATE_DIR, "attempts"))) {
+      const r = load(p); if (!r) continue;
+      db.run("INSERT OR REPLACE INTO attempts (id, course, quiz, answers, grade, created_at) VALUES (?,?,?,?,?,?)", [r.id, r.course, r.quiz, JSON.stringify(r.answers), r.grade ? JSON.stringify(r.grade) : null, r.createdAt]);
+    }
+    // Chats are upserted, not truncated: session_id is a local handle the file does not carry.
+    for (const p of walk(join(STATE_DIR, "chats"))) {
+      const c = load(p); if (!c) continue;
+      db.run(`INSERT INTO chats (id, course, doc, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,NULL,?,?)
+              ON CONFLICT(id) DO UPDATE SET context=excluded.context, title=excluded.title, updated_at=excluded.updated_at`,
+        [c.id, c.course, c.doc, c.context ?? null, c.title ?? null, c.createdAt, c.updatedAt ?? c.createdAt]);
+      for (const m of c.messages ?? [])
+        db.run("INSERT OR IGNORE INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [m.id, c.id, m.role, m.content, m.createdAt]);
+    }
+  });
+  run();
+}
+
+// --- one-time migration: rows that predate state files --------------------
+export function migrate() {
+  const marker = join(STATE_DIR, ".migrated");
+  if (existsSync(marker)) return;
+  for (const r of db.query("SELECT course, question FROM answers").all() as any[]) state.answer(r.course, r.question);
+  for (const r of db.query("SELECT id FROM annotations").all() as any[]) state.annotation(r.id);
+  for (const r of db.query("SELECT id FROM chats").all() as any[]) state.chat(r.id);
+  for (const r of db.query("SELECT id FROM attempts").all() as any[]) state.attempt(r.id);
+  mkdirSync(STATE_DIR, { recursive: true });
+  writeFileSync(marker, new Date().toISOString() + "\n");
+}

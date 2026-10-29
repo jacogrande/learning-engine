@@ -28,6 +28,10 @@ Everything that costs anything — generating modules, grading, chat — runs th
 3. **Git is automated.** `git pull --rebase` on start; `git push` after every job commit; state files committed after a minute of quiet and on shutdown. The user supplies credentials by having cloned the repo.
 4. **Chat sessions are per machine.** `--resume` uses `~/.claude`, which does not sync. If resume fails, start a new session whose first prompt replays the stored transcript. Messages live in the library; only the session handle is local.
 
+## Status
+
+Built and verified 2026-10-29 — see [phase-4-results.md](phase-4-results.md). The library lives at `github.com/jacogrande/learning-library` (private).
+
 ## Rejected
 
 - **Cloud SQL (Turso, Neon, Supabase):** adds an account, a network dependency, and a second source of truth for marginal gain. Turso embedded replicas are the closest fit but swap `bun:sqlite` for libsql.

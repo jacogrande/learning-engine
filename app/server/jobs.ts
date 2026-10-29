@@ -1,11 +1,12 @@
 // Runs Claude Code headlessly. Two lanes: heavy (generation, minutes) and light (grading, chat,
 // seconds), one job at a time per lane so a chat never waits behind a module build.
-import { spawn, execFile, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, id, now } from "./db";
 import { ROOT } from "./content";
 import { broadcast } from "./events";
+import { commit as syncCommit, flush } from "./sync";
 
 export type JobKind = "assess" | "outline" | "module" | "drilldown" | "reading" | "grade" | "chat";
 type Lane = "heavy" | "light";
@@ -18,6 +19,7 @@ type Opts = {
   ref?: string; schema?: object; resume?: string;
   stream?: (text: string) => void;                 // text deltas, for chat
   then?: (result: unknown, job: Job) => void;
+  fail?: (job: Job) => void;
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
@@ -43,12 +45,13 @@ const cancelled = new Set<string>();
 // Anything still marked running/queued when the server starts did not survive the last process.
 db.run("UPDATE jobs SET status='interrupted', finished_at=? WHERE status IN ('running','queued')", [now()]);
 for (const sig of ["SIGINT", "SIGTERM"] as const)
-  process.on(sig, () => {
+  process.on(sig, async () => {
     for (const lane of ["heavy", "light"] as Lane[]) {
       const c = current[lane];
       if (c) { killTree(c.child); finish(c.job, "interrupted"); }
       for (const j of queues[lane]) finish(j, "interrupted");
     }
+    await Promise.race([flush(), new Promise((r) => setTimeout(r, 8000))]);   // push pending state, briefly
     process.exit(0);
   });
 
@@ -90,16 +93,8 @@ function finish(job: Job, status: Job["status"], extra: Partial<Job> = {}) {
   log(job.id, `= ${status}${job.error ? `: ${job.error}` : ""}`);
   broadcast({ type: "job", job: pub(job) });
   broadcast({ type: "content" });   // status is part of what pages show
-  if (status === "done" && COMMITS[job.kind]) commit(job);
-}
-
-// Each generation step becomes a commit of content/ only, tagged with the job id.
-function commit(job: Job) {
-  const msg = `gen(${job.kind}): ${job.course}${job.ref ? ` ${job.ref}` : ""}\n\nRun-Id: ${job.id}`;
-  execFile("git", ["add", "-A", "--", "content/"], { cwd: ROOT }, (e) => {
-    if (e) return log(job.id, `! git add: ${e.message}`);
-    execFile("git", ["commit", "-q", "-m", msg], { cwd: ROOT }, (e2) => log(job.id, e2 ? `! git commit: ${e2.message.split("\n")[0]}` : "committed"));
-  });
+  // Each generation step becomes a commit of the library, tagged with the job id.
+  if (status === "done" && COMMITS[job.kind]) syncCommit(`gen(${job.kind}): ${job.course}${job.ref ? ` ${job.ref}` : ""}\n\nRun-Id: ${job.id}`);
 }
 
 // Strip nested-session vars (present when launched from inside Claude Code) and any API key:
@@ -149,7 +144,7 @@ function pump(lane: Lane) {
     if (job.status === "running") {
       if (cancelled.delete(job.id) || code === null) finish(job, "cancelled");
       else if (code === 0 && !job.error) { finish(job, "done"); o.then?.(job.result, job); }
-      else finish(job, "failed", { error: job.error ?? `exit ${code}` });
+      else { finish(job, "failed", { error: job.error ?? `exit ${code}` }); o.fail?.(job); }
     }
     pump(lane);
   });
