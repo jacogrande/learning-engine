@@ -30,7 +30,7 @@ Write 3–6 files `modules/<id>/NN-<two-to-four-word-slug>.md`, one at a time, i
 
 1. Frontmatter: `title` (quoted), `order`.
 2. `:::callout{type=note}`: one sentence, "After this section you can <the objective, or the part this section covers>."
-3. First section only, when an earlier module exists: a `:::callout{type=tip}` naming in one sentence what this module picks up from `carry`, then one `quiz` block (id `q-NN-r1`) re-asking the first `carry` item on a new case, before any prose.
+3. First section only, when an earlier module exists: a `:::callout{type=tip}` naming in one sentence what this module picks up from `carry`, then one `quiz` block (id `q-NN-r1`) re-asking the first `carry` item on a new case, before any prose. If `learner.md` records `retention` under 0.8 for this course, make it two warm-up questions (`q-NN-r1`, `q-NN-r2`).
 4. One `:::predict`.
 5. Prose per `voice.md`, at the objective's `level`: claim, mechanism, one example from the research in the learner's first domain, one failure case. Link a source inline where a claim needs one. If the section builds on an earlier one, its first sentence names what it takes from there. Every term a quiz or rubric uses is defined in bold before use, here or earlier; define the terms in `learner.md` `asks` before anything else.
 6. 1–3 `quiz` blocks per the content grammar, ids `q-NN-01` onward across the module, each with `objective:`. At least one per section asks the learner to write or rewrite something, not only to classify. The last question in each section applies the idea to a case from a `domains` entry the prose did not use.

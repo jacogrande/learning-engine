@@ -1,5 +1,7 @@
 # Spec: Daily review
 
+*Status: built — all five steps shipped 2026-10-29; see [review-roadmap.html](review-roadmap.html). Decisions: baseline questions are never cards; the daily cap is soft (+10 more); MCQ variants change the case in the stem and keep the misconceptions.*
+
 A daily (or whenever) test of what you know across every course. Anki's loop — a queue of due items, graded, rescheduled — with two differences: the items are the course's own questions, graded by the course's own grader, and the system already knows what you got wrong and why.
 
 ## What exists

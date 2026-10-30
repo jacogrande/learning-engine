@@ -52,6 +52,7 @@ db.run(`
     PRIMARY KEY (course, question)
   );
   -- one row per review session (daily, course, module, …); drives the streak and the summary
+  CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS review_sessions (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, scope TEXT, started_at TEXT NOT NULL, ended_at TEXT,
     reviewed INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, sure_wrong INTEGER NOT NULL DEFAULT 0
@@ -59,7 +60,8 @@ db.run(`
 `);
 // Columns added after the first release.
 for (const [table, col, type] of [["answers", "confidence", "INTEGER"], ["chats", "kind", "TEXT NOT NULL DEFAULT 'section'"], ["chats", "module", "TEXT"],
-                                  ["cards", "state", "TEXT NOT NULL DEFAULT 'new'"], ["cards", "suspended", "INTEGER NOT NULL DEFAULT 0"], ["cards", "flag", "TEXT"]])
+                                  ["cards", "state", "TEXT NOT NULL DEFAULT 'new'"], ["cards", "suspended", "INTEGER NOT NULL DEFAULT 0"], ["cards", "flag", "TEXT"],
+                                  ["cards", "variants", "TEXT NOT NULL DEFAULT '[]'"], ["cards", "last_variant", "INTEGER NOT NULL DEFAULT -1"]])
   if (!(db.query(`PRAGMA table_info(${table})`).all() as any[]).some((c) => c.name === col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 
 export const id = () => crypto.randomUUID().slice(0, 8);

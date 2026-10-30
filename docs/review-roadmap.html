@@ -86,11 +86,11 @@
     <h2><span class="n">Step 3</span>Variants<span class="est">1 day</span></h2>
     <p class="why">Recall of the idea, not the wording. The one real departure from flashcards.</p>
     <ul>
-      <li><label><input type="checkbox" id="s3-1"><span>Skill <code>review-variant &lt;slug&gt; &lt;doc&gt; &lt;id&gt;</code><small>Reads the question, its rubric, the section and <code>learner.md</code>; returns one variant by <code>--json-schema</code>: same idea units, a case from a domain the original did not use; MCQ keeps the misconceptions as distractors. Light lane, no file writes.</small></span></label></li>
-      <li><label><input type="checkbox" id="s3-2"><span>Storage and rotation<small>Up to three variants on the card (<code>variants</code> JSON, <code>last_variant</code>); generate the first when a card is reviewed the second time; original wording one time in four.</small></span></label></li>
-      <li><label><input type="checkbox" id="s3-3"><span>Grading against the variant<small><code>/grade</code> receives the variant's rubric; the review logs <code>variant: n</code>; the schedule stays on the original card.</small></span></label></li>
-      <li><label><input type="checkbox" id="s3-4"><span>Variant badge and "show original"<small>So a confusing variant can be checked against the question it came from.</small></span></label></li>
-      <li><label><input type="checkbox" id="s3-5"><span>Guard<small>Lint a variant like any quiz block before storing it; drop it and log if it fails.</small></span></label></li>
+      <li><label><input type="checkbox" id="s3-1" data-default="done"><span>Skill <code>review-variant &lt;slug&gt; &lt;doc&gt; &lt;id&gt;</code><small>Reads the question, its rubric, the section and <code>learner.md</code>; returns one variant by <code>--json-schema</code>: same idea units, a case from a domain the original did not use; MCQ keeps the misconceptions as distractors. Light lane, no file writes.</small></span></label></li>
+      <li><label><input type="checkbox" id="s3-2" data-default="done"><span>Storage and rotation<small>Up to three variants on the card (<code>variants</code> JSON, <code>last_variant</code>); generate the first when a card is reviewed the second time; original wording one time in four.</small></span></label></li>
+      <li><label><input type="checkbox" id="s3-3" data-default="done"><span>Grading against the variant<small><code>/grade</code> receives the variant's rubric; the review logs <code>variant: n</code>; the schedule stays on the original card.</small></span></label></li>
+      <li><label><input type="checkbox" id="s3-4" data-default="done"><span>Variant badge and "show original"<small>So a confusing variant can be checked against the question it came from.</small></span></label></li>
+      <li><label><input type="checkbox" id="s3-5" data-default="done"><span>Guard<small>Lint a variant like any quiz block before storing it; drop it and log if it fails.</small></span></label></li>
     </ul>
     <p class="gate"><b>Done when:</b> a card reviewed three times has shown three different cases, and the grader marked the variant answers against the variant rubric.</p>
   </section>
@@ -99,11 +99,11 @@
     <h2><span class="n">Step 4</span>Ad hoc modes<span class="est">½ day</span></h2>
     <p class="why">For the days you want more, and for the night before a wrap-up.</p>
     <ul>
-      <li><label><input type="checkbox" id="s4-1"><span>Course and module modes<small>All non-suspended cards from the scope, interleaved, due or not.</small></span></label></li>
-      <li><label><input type="checkbox" id="s4-2"><span>Weak spots<small>Lapse in the last 30 days, or objective <code>partial</code>/<code>unmet</code> in an <code>understanding.md</code>, or tagged with a pattern in <code>learner.md</code> <code>errors</code>; cap 20.</small></span></label></li>
-      <li><label><input type="checkbox" id="s4-3"><span>Burst<small>10 random cards across courses, soft timer.</small></span></label></li>
-      <li><label><input type="checkbox" id="s4-4"><span>Cram from the wrap-up page<small>Module's section cards, variants preferred, offered before "Start discussion."</small></span></label></li>
-      <li><label><input type="checkbox" id="s4-5"><span>Mode menu on the empty daily page<small>Plus the last session's summary.</small></span></label></li>
+      <li><label><input type="checkbox" id="s4-1" data-default="done"><span>Course and module modes<small>All non-suspended cards from the scope, interleaved, due or not.</small></span></label></li>
+      <li><label><input type="checkbox" id="s4-2" data-default="done"><span>Weak spots<small>Lapse in the last 30 days, or objective <code>partial</code>/<code>unmet</code> in an <code>understanding.md</code>, or tagged with a pattern in <code>learner.md</code> <code>errors</code>; cap 20.</small></span></label></li>
+      <li><label><input type="checkbox" id="s4-3" data-default="done"><span>Burst<small>10 random cards across courses, soft timer.</small></span></label></li>
+      <li><label><input type="checkbox" id="s4-4" data-default="done"><span>Cram from the wrap-up page<small>Module's section cards, variants preferred, offered before "Start discussion."</small></span></label></li>
+      <li><label><input type="checkbox" id="s4-5" data-default="done"><span>Mode menu on the empty daily page<small>Plus the last session's summary.</small></span></label></li>
     </ul>
   </section>
 
@@ -111,10 +111,10 @@
     <h2><span class="n">Step 5</span>Scheduling and the profile<span class="est">1 day, after ~400 reviews</span></h2>
     <p class="why">Tuning that only pays once there is data.</p>
     <ul>
-      <li><label><input type="checkbox" id="s5-1"><span>Retention setting<small>0.85–0.95, global with a per-course override; stored as a state file.</small></span></label></li>
-      <li><label><input type="checkbox" id="s5-2"><span>Optimizer<small>Fit FSRS weights to this learner's review log (<code>fsrs-rs-nodejs</code> or ts-fsrs <code>reschedule</code>); run on demand from the review page, nightly later.</small></span></label></li>
-      <li><label><input type="checkbox" id="s5-3"><span>Profile fields<small><code>calibration</code> running counts across courses; <code>retention</code> per course (share rated Good+ in 30 days); <code>leeches</code>. <code>wrap-module</code> and <code>generate-module</code> read them.</small></span></label></li>
-      <li><label><input type="checkbox" id="s5-4"><span>Stats view<small>Cards by state, reviews per day, retention trend; one page, no charts library beyond what the app has.</small></span></label></li>
+      <li><label><input type="checkbox" id="s5-1" data-default="done"><span>Retention setting<small>0.85–0.95, global with a per-course override; stored as a state file.</small></span></label></li>
+      <li><label><input type="checkbox" id="s5-2" data-default="done"><span>Optimizer<small>Fit FSRS weights to this learner's review log (<code>fsrs-rs-nodejs</code> or ts-fsrs <code>reschedule</code>); run on demand from the review page, nightly later.</small></span></label></li>
+      <li><label><input type="checkbox" id="s5-3" data-default="done"><span>Profile fields<small><code>calibration</code> running counts across courses; <code>retention</code> per course (share rated Good+ in 30 days); <code>leeches</code>. <code>wrap-module</code> and <code>generate-module</code> read them.</small></span></label></li>
+      <li><label><input type="checkbox" id="s5-4" data-default="done"><span>Stats view<small>Cards by state, reviews per day, retention trend; one page, no charts library beyond what the app has.</small></span></label></li>
     </ul>
   </section>
 
@@ -123,7 +123,7 @@
     <ul class="questions">
       <li><b>Baseline questions as cards?</b><small>Decided: no. Baseline docs never create cards.</small></li>
       <li><b>Daily cap: hard stop or "10 more"?</b><small>Decided: soft. The daily page ends at the cap and offers +10 more.</small></li>
-      <li><b>MCQ variants: new options or new stem?</b><small>Proposal: change the case in the stem, keep the misconceptions, let wording vary.</small></li>
+      <li><b>MCQ variants: new options or new stem?</b><small>Decided: new case in the stem, same misconceptions as distractors in new wording, a new correct option.</small></li>
     </ul>
   </section>
 

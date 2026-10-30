@@ -5,7 +5,7 @@ import { get, post, useJobs, type Job } from "./api";
 const label = (j: Job) => ({
   start: `Starting course: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
   test: `Writing module test ${j.ref?.split("/")[0]}`, wrap: `Wrapping up ${j.ref?.split("/")[0]}`,
-  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying",
+  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant",
 }[j.kind]);
 
 export function JobBar() {
@@ -13,7 +13,7 @@ export function JobBar() {
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   // Chat and grading show their progress in place; the bar is for the long jobs.
-  const shown = jobs.filter((j) => !["chat", "grade"].includes(j.kind));
+  const shown = jobs.filter((j) => !["chat", "grade", "variant"].includes(j.kind));
   const job = shown.find((j) => j.status === "running") ?? shown[0];
   const [, tick] = useState(0);
 

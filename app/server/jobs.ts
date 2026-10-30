@@ -8,7 +8,7 @@ import { ROOT } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
-export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat";
+export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant";
 type Lane = "heavy" | "light";
 export type Job = {
   id: string; course: string; kind: JobKind; ref?: string;
@@ -24,7 +24,7 @@ type Opts = {
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light" };
+const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "light" };
 const TOOLS: Record<JobKind, string> = {
   start: "Read,Glob,Write,Agent,WebSearch,WebFetch",
   assess: "Read,Glob,Write",
@@ -36,6 +36,7 @@ const TOOLS: Record<JobKind, string> = {
   reading: "Read,Glob,Write,WebSearch,WebFetch",
   grade: "Read",
   chat: "Read,Glob,Grep",
+  variant: "Read",
 };
 const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true };
 

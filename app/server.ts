@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded } from "./server/review";
+import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, settings, setSetting, optimize, reschedule, stats, type Mode } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -150,6 +150,17 @@ async function evidence(course: string, mod: string) {
   return { summary: p.summary ?? "", discussion: chat, answers, cards };
 }
 
+const VARIANT_SCHEMA = { type: "object", properties: { prompt: { type: "string" }, rubric: { type: "string" }, options: { type: "array", items: { type: "string" } }, answer: { type: "integer" }, explanation: { type: "string" } }, required: ["prompt"] };
+setVariantHook((it) => {
+  markVariantPending(it.course, it.question, true);
+  const prior = variantsOf(it.course, it.question).map((v, i) => `${i + 1}. ${v.prompt}`).join("\n");
+  enqueue(it.course, "variant", `/review-variant ${it.course} ${it.doc} ${it.question}${prior ? `\n\nVariants already written:\n${prior}` : ""}`, {
+    ref: it.question, schema: VARIANT_SCHEMA,
+    then: (v: any) => { markVariantPending(it.course, it.question, false); const err = addVariant(it.course, it.question, it.original.type, v ?? {}); if (err) console.warn(`variant ${it.course}/${it.question}: ${err}`); },
+    fail: () => markVariantPending(it.course, it.question, false),
+  });
+});
+
 migrate();
 sync.afterPull(() => { rebuild(); broadcast({ type: "content" }); });
 await sync.init();
@@ -224,19 +235,21 @@ Bun.serve({
       // Confidence is recorded before feedback; the result feeds the spaced-review schedule.
       POST: async (req) => {
         const slug = req.params.slug;
-        const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
+        const { question: qid, doc, answer, type, result, confidence, variant } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number; variant?: number | null };
+        const v = variant != null ? variantsOf(slug, qid)[variant] : null;
         let job: string | null = null;
         const jobRef = { id: "" };
         if (type === "short") {
           const flag = flagOf(slug, qid);
-          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
+          const asked = v ? `\n\nThis review asked a variant of the question, not the block in the file. Grade against the variant:\nPrompt: ${v.prompt}\nRubric: ${v.rubric}` : "";
+          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}${asked}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
             ref: qid, schema: GRADE_SCHEMA,
             then: (g: any) => {
               // Only if this is still the answer the job graded (the learner may have re-checked since).
               const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobRef.id]);
               if (!r.changes) return;
               state.answer(slug, qid);
-              rate(slug, qid, doc, g.result, confidence);
+              rate(slug, qid, doc, g.result, confidence, variant ?? null);
               broadcast({ type: "answer", course: slug, doc, question: qid });
             },
           }).id;
@@ -245,7 +258,7 @@ Bun.serve({
                 ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
           [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, now(), type === "mcq" ? now() : null]);
         state.answer(slug, qid);
-        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence) : null;
+        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence, variant ?? null) : null;
         return json({ ok: true, job, review });
       },
     },
@@ -351,9 +364,18 @@ Bun.serve({
     "/api/review": async (req) => {
       const u = new URL(req.url);
       const exclude = (u.searchParams.get("exclude") ?? "").split(",").filter(Boolean);
-      const course = u.searchParams.get("course") ?? undefined;
-      return json({ ...(await queue({ course, cap: Number(u.searchParams.get("cap") ?? 20), exclude })), summary: summary(course), last: lastSession() });
+      const mode = (u.searchParams.get("mode") ?? "daily") as Mode;
+      const scope = u.searchParams.get("scope") ?? u.searchParams.get("course") ?? undefined;
+      const cap = u.searchParams.get("cap") ? Number(u.searchParams.get("cap")) : undefined;
+      const course = mode === "daily" || mode === "course" ? scope : mode === "module" || mode === "cram" ? scope?.split("/")[0] : undefined;
+      return json({ ...(await queue({ mode, scope, cap, exclude })), summary: summary(course), last: lastSession() });
     },
+    "/api/review/settings": {
+      GET: () => json(settings()),
+      PUT: async (req) => { const b = (await req.json()) as { retention?: number; dailyCap?: number }; if (b.retention) setSetting("retention", Math.min(0.97, Math.max(0.8, b.retention))); if (b.dailyCap) setSetting("dailyCap", Math.min(100, Math.max(5, b.dailyCap))); if (b.retention) reschedule(); return json(settings()); },
+    },
+    "/api/review/optimize": { POST: async () => json(await optimize()) },
+    "/api/review/stats": () => json(stats()),
     "/api/review/sessions": { POST: async (req) => { const { kind, scope } = (await req.json()) as { kind: string; scope?: string }; return json(startSession(kind, scope ?? null)); } },
     "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); return json({ ok: true }); } },

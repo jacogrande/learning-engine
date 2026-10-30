@@ -5,15 +5,16 @@ import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
 import { ReviewPage } from "./Review";
+import { StatsPage } from "./Stats";
 
 // A server started before the client was updated still sends objectives as strings.
 export const objectiveText = (o: { text?: string } | string) => (typeof o === "string" ? o : o.text ?? "");
 
 // --- tiny router ---------------------------------------------------------
 function usePath() {
-  const [path, setPath] = useState(location.pathname);
-  useEffect(() => { const on = () => setPath(location.pathname); addEventListener("popstate", on); return () => removeEventListener("popstate", on); }, []);
-  return path;
+  const [path, setPath] = useState(location.pathname + location.search);
+  useEffect(() => { const on = () => setPath(location.pathname + location.search); addEventListener("popstate", on); return () => removeEventListener("popstate", on); }, []);
+  return path.split("?")[0];
 }
 export function navigate(to: string) { history.pushState(null, "", to); dispatchEvent(new PopStateEvent("popstate")); }
 export const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
@@ -22,7 +23,8 @@ export const Link = ({ to, children, className }: { to: string; children: ReactN
 
 export function App() {
   const path = usePath();
-  if (path === "/review") return <><ReviewPage /><JobBar /></>;
+  if (path === "/review/stats") return <><StatsPage /><JobBar /></>;
+  if (path === "/review") { const sp = new URLSearchParams(location.search); return <><ReviewPage key={location.search} mode={(sp.get("mode") as any) ?? undefined} scope={sp.get("scope") ?? undefined} /><JobBar /></>; }
   const m = /^\/c\/([^/]+)(?:\/(baseline|review)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
   return (
     <>

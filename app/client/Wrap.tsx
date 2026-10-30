@@ -51,6 +51,7 @@ export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod:
       <p className="lede">Explain this module to a smart colleague who missed it. Cover what it claims, how it works, one worked example of your own, and where it stops applying. Write it from memory; the sections stay closed.</p>
       <ul className="objectives wrap-objectives">{mod.objectives.map((o, i) => <li key={o.id ?? i}>{objectiveText(o)}</li>)}</ul>
       <Editor ref={editor} value={p.summary ?? ""} placeholder="Start with the main claim." className="wrap-editor" onChange={save} />
+      <p className="muted cram">Want a warm-up first? <Link to={`/review?mode=cram&scope=${slug}/${mod.id}`}>Cram this module's questions</Link> (variants preferred), then come back and write.</p>
       <footer className="article-foot">
         <span className="muted">{words} words{words > 0 && words < 120 ? " · aim for 150–400" : ""}</span>
         <button className="primary" disabled={words < 60} onClick={async () => { clearTimeout(timer.current); await put(url, { summary: draft }); await post(`/api/courses/${slug}/modules/${mod.id}/discuss`, { summary: draft }); reload(); }}>Start discussion</button>
