@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, settings, setSetting, optimize, reschedule, stats, type Mode } from "./server/review";
+import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -156,10 +156,29 @@ setVariantHook((it) => {
   const prior = variantsOf(it.course, it.question).map((v, i) => `${i + 1}. ${v.prompt}`).join("\n");
   enqueue(it.course, "variant", `/review-variant ${it.course} ${it.doc} ${it.question}${prior ? `\n\nVariants already written:\n${prior}` : ""}`, {
     ref: it.question, schema: VARIANT_SCHEMA,
-    then: (v: any) => { markVariantPending(it.course, it.question, false); const err = addVariant(it.course, it.question, it.original.type, v ?? {}); if (err) console.warn(`variant ${it.course}/${it.question}: ${err}`); },
-    fail: () => markVariantPending(it.course, it.question, false),
+    then: (v: any) => {
+      markVariantPending(it.course, it.question, false);
+      const err = addVariant(it.course, it.question, it.original.type, v ?? {});
+      if (err) { markVariantFailed(it.course, it.question); console.warn(`variant ${it.course}/${it.question}: ${err}`); }
+    },
+    fail: () => { markVariantPending(it.course, it.question, false); markVariantFailed(it.course, it.question); },
   });
 });
+
+// One grade job for a short answer. When review asked a variant, the grader is told so in the system
+// prompt, which outranks the skill's "find the block in the file" step.
+function gradeShort(slug: string, doc: string, qid: string, answer: string, variant: { prompt: string; rubric?: string } | null, then: (g: { result: Result; note: string }, jobId: string) => void) {
+  const flag = flagOf(slug, qid);
+  const ref = { id: "" };
+  const asked = variant ? `\n\nThe learner was asked this variant of the question, not the block in the file:\nPrompt: ${variant.prompt}\nRubric: ${variant.rubric ?? "(the original rubric's idea units, applied to this case)"}` : "";
+  const system = variant ? "This grade is for a variant of the quiz question. Score the learner's answer against the variant's prompt and rubric given in the request, not against the block in the file; read the file only for context on the idea being tested." : undefined;
+  ref.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}${asked}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
+    ref: qid, schema: GRADE_SCHEMA, system, then: (g: any) => then(g, ref.id),
+  }).id;
+  return ref.id;
+}
+// Review grades in flight, one per card: a stale job (the learner re-checked) must not rate the card twice.
+const pendingReviewGrades = new Map<string, string>();
 
 migrate();
 sync.afterPull(() => { rebuild(); broadcast({ type: "content" }); });
@@ -235,30 +254,23 @@ Bun.serve({
       // Confidence is recorded before feedback; the result feeds the spaced-review schedule.
       POST: async (req) => {
         const slug = req.params.slug;
-        const { question: qid, doc, answer, type, result, confidence, variant } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number; variant?: number | null };
-        const v = variant != null ? variantsOf(slug, qid)[variant] : null;
+        const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
         let job: string | null = null;
-        const jobRef = { id: "" };
         if (type === "short") {
-          const flag = flagOf(slug, qid);
-          const asked = v ? `\n\nThis review asked a variant of the question, not the block in the file. Grade against the variant:\nPrompt: ${v.prompt}\nRubric: ${v.rubric}` : "";
-          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}${asked}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
-            ref: qid, schema: GRADE_SCHEMA,
-            then: (g: any) => {
-              // Only if this is still the answer the job graded (the learner may have re-checked since).
-              const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobRef.id]);
-              if (!r.changes) return;
-              state.answer(slug, qid);
-              rate(slug, qid, doc, g.result, confidence, variant ?? null);
-              broadcast({ type: "answer", course: slug, doc, question: qid });
-            },
-          }).id;
+          job = gradeShort(slug, doc, qid, answer, null, (g, jobId) => {
+            // Only if this is still the answer the job graded (the learner may have re-checked since).
+            const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobId]);
+            if (!r.changes) return;
+            state.answer(slug, qid);
+            rate(slug, qid, doc, g.result, confidence);
+            broadcast({ type: "answer", course: slug, doc, question: qid });
+          });
         }
         db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, confidence, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
           [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, now(), type === "mcq" ? now() : null]);
         state.answer(slug, qid);
-        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence, variant ?? null) : null;
+        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence) : null;
         return json({ ok: true, job, review });
       },
     },
@@ -376,6 +388,30 @@ Bun.serve({
     },
     "/api/review/optimize": { POST: async () => json(await optimize()) },
     "/api/review/stats": () => json(stats()),
+    // A review answer rates the card and goes into its log; the lesson's `answers` row is untouched, so
+    // the lesson page keeps showing what the learner did there, graded against the wording they saw.
+    "/api/review/answer": {
+      POST: async (req) => {
+        const { course, question: qid, doc, answer, type, result, confidence, variant } = (await req.json()) as { course: string; question: string; doc: string; answer: string; type: "mcq" | "short"; result?: Result; confidence?: number; variant?: number | null };
+        if (!course || !qid || !doc || typeof answer !== "string") return json({ error: "course, question, doc, answer required" }, 400);
+        const vi = variant ?? null, v = vi != null ? variantsOf(course, qid)[vi] ?? null : null;
+        const key = `${course}:${qid}`;
+        if (type === "short") {
+          const job = gradeShort(course, doc, qid, answer, v, (g, jobId) => {
+            if (pendingReviewGrades.get(key) !== jobId) return;   // a later answer superseded this one
+            pendingReviewGrades.delete(key);
+            rate(course, qid, doc, g.result, confidence, vi, { answer, note: g.note });
+            broadcast({ type: "card", course, question: qid });
+          });
+          pendingReviewGrades.set(key, job);
+          return json({ ok: true, job, review: null });
+        }
+        if (!result) return json({ error: "result required for mcq" }, 400);
+        pendingReviewGrades.delete(key);
+        return json({ ok: true, job: null, review: rate(course, qid, doc, result, confidence, vi, { answer }) });
+      },
+    },
+    "/api/review/cards/:course/:question": (req) => { const c = cardStatus(req.params.course, req.params.question); return c ? json(c) : json({ error: "not found" }, 404); },
     "/api/review/sessions": { POST: async (req) => { const { kind, scope } = (await req.json()) as { kind: string; scope?: string }; return json(startSession(kind, scope ?? null)); } },
     "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); return json({ ok: true }); } },

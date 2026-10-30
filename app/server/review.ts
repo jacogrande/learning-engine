@@ -51,27 +51,40 @@ function stateOf(card: Card, streak: number, reviews: number, suspended: boolean
   return "learning";
 }
 
-export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null) {
+// A leech: six lapses after learning, or six Again ratings in a row at any stage.
+const isLeech = (card: Card, logs: any[]) =>
+  card.lapses >= LEECH_LAPSES || (logs.length >= LEECH_LAPSES && logs.slice(-LEECH_LAPSES).every((l: any) => l.rating === Rating.Again));
+
+// Review answers live in the card's log (answer and grader note), not in the lesson's `answers` row.
+export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string } = {}) {
   if (doc.startsWith("quizzes/")) return null;   // baseline: no card
-  const row = db.query("SELECT card, streak, log, suspended FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  const row = db.query("SELECT card, streak, log, suspended, last_variant FROM cards WHERE course=? AND question=?").get(course, question) as any;
   const prev: Card = row ? revive(JSON.parse(row.card)) : createEmptyCard(new Date());
   const r = rating(result, confidence);
   const { card, log } = scheduler().next(prev, new Date(), r);
   const streak = r === Rating.Again ? 0 : (row?.streak ?? 0) + 1;
-  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant }];
+  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant, ...(extra.answer !== undefined ? { answer: extra.answer } : {}), ...(extra.note ? { note: extra.note } : {}) }];
   const module = /^modules\/([^/]+)\//.exec(doc)?.[1] ?? null;
   let suspended = !!row?.suspended;
   let leech = false;
-  // A leech: six lapses after learning, or six Again ratings in a row at any stage.
-  const recentAgain = logs.slice(-LEECH_LAPSES).length === LEECH_LAPSES && logs.slice(-LEECH_LAPSES).every((l: any) => l.rating === Rating.Again);
-  if (!suspended && (card.lapses >= LEECH_LAPSES || recentAgain)) { suspended = true; leech = true; }
+  if (!suspended && isLeech(card, logs)) { suspended = true; leech = true; }
   const st = stateOf(card, streak, logs.length, suspended);
+  // last_variant drives rotation, so asking the original leaves it where it was.
+  const lastVariant = variant ?? row?.last_variant ?? -1;
   db.run(`INSERT INTO cards (course, question, doc, module, due, card, streak, log, state, suspended, last_variant, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
           ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, module=excluded.module, due=excluded.due, card=excluded.card, streak=excluded.streak, log=excluded.log, state=excluded.state, suspended=excluded.suspended, last_variant=excluded.last_variant, updated_at=excluded.updated_at`,
-    [course, question, doc, module, card.due.toISOString(), JSON.stringify(card), streak, JSON.stringify(logs), st, suspended ? 1 : 0, variant ?? -1, now()]);
+    [course, question, doc, module, card.due.toISOString(), JSON.stringify(card), streak, JSON.stringify(logs), st, suspended ? 1 : 0, lastVariant, now()]);
   state.card(course, question);
   if (leech) recordLeech(course, question, doc);
-  return { due: card.due.toISOString(), streak, state: st, leech };
+  return { due: card.due.toISOString(), streak, state: st, leech, reviews: logs.length };
+}
+
+// What the review page polls after answering: the schedule and the last log entry (result, note).
+export function cardStatus(course: string, question: string) {
+  const r = db.query("SELECT due, streak, state, log FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  if (!r) return null;
+  const log = JSON.parse(r.log), last = log.at(-1) ?? null;
+  return { due: r.due, streak: r.streak, state: r.state, reviews: log.length, last: last && { result: last.result ?? null, note: last.note ?? null, confidence: last.confidence ?? null, variant: last.variant ?? null, review: last.review ?? null } };
 }
 
 // --- learner profile writes ---------------------------------------------------
@@ -83,41 +96,60 @@ function readProfile(course: string): { path: string; fm: any; body: string } | 
   let fm: any; try { fm = YAML.parse(m[1]) ?? {}; } catch { return null; }
   return { path, fm, body: m[2] };
 }
-function writeProfile(p: { path: string; fm: any; body: string }) {
-  writeFileSync(p.path, `---\n${YAML.stringify(p.fm, { defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN" }).trimEnd()}\n---\n${p.body}`);
+// Set (or remove, with undefined) top-level frontmatter keys by editing their lines in place, so
+// hand-written YAML elsewhere in the file keeps its style. Writes only when a value changed.
+function patchProfile(course: string, patch: Record<string, unknown>): boolean {
+  const p = readProfile(course); if (!p) return false;
+  let fmText = readFileSync(p.path, "utf8").match(/^---\n([\s\S]*?)\n---/)![1] + "\n";
+  let changed = false;
+  for (const [key, value] of Object.entries(patch)) {
+    if (JSON.stringify(p.fm[key] ?? null) === JSON.stringify(value ?? null)) continue;
+    changed = true;
+    const block = value === undefined ? "" : YAML.stringify({ [key]: value }, { defaultStringType: "QUOTE_DOUBLE", defaultKeyType: "PLAIN", lineWidth: 0 });
+    // The key's line plus every continuation line (indented, or a list item at the key's indent).
+    const re = new RegExp(`^${key}:[^\\n]*\\n(?:(?:[ \\t]+[^\\n]*|-[^\\n]*)\\n)*`, "m");
+    fmText = re.test(fmText) ? fmText.replace(re, block) : fmText + block;
+  }
+  if (!changed) return false;
+  writeFileSync(p.path, `---\n${fmText.trimEnd()}\n---\n${p.body}`);
   touch();
+  return true;
 }
 // A leech goes into the learner profile so the next module generation picks it up as a carry item.
 function recordLeech(course: string, question: string, doc: string) {
   const p = readProfile(course); if (!p) return;
-  p.fm.errors = Array.isArray(p.fm.errors) ? p.fm.errors : [];
-  if (p.fm.errors.some((e: any) => e?.seen?.includes(question))) return;
-  p.fm.errors.push({ pattern: `Leech: ${question} in ${doc} keeps lapsing in review`, seen: [question] });
-  p.fm.leeches = [...new Set([...(p.fm.leeches ?? []), question])];
-  writeProfile(p);
+  const errors = Array.isArray(p.fm.errors) ? [...p.fm.errors] : [];
+  const patch: Record<string, unknown> = { leeches: [...new Set([...(Array.isArray(p.fm.leeches) ? p.fm.leeches : []), question])] };
+  if (!errors.some((e: any) => e?.seen?.includes(question))) patch.errors = [...errors, { pattern: `Leech: ${question} in ${doc} keeps lapsing in review`, seen: [question] }];
+  patchProfile(course, patch);
 }
-// After a session: calibration across courses, retention per course, leeches. Read by generate-module and wrap-module.
-export function updateProfiles() {
+// After a session with reviews: review calibration counts, retention per course, leeches (the cards
+// rate() suspended as leeches, not ones the learner suspended by hand). Only the courses reviewed in
+// this session are written. `calibration` itself belongs to wrap-module; review data has its own key.
+export function updateProfiles(sessionStart: string) {
   const since = new Date(Date.now() - 30 * 864e5).toISOString();
-  const rows = db.query("SELECT course, question, log, suspended FROM cards").all() as any[];
-  const by: Record<string, { reviews: number; good: number; sureWrong: number; guessRight: number; leeches: string[] }> = {};
+  const rows = db.query("SELECT course, question, card, log, suspended FROM cards").all() as any[];
+  const by: Record<string, { reviews: number; good: number; sureWrong: number; guessRight: number; leeches: string[]; touched: boolean }> = {};
   const all = { sureWrong: 0, guessRight: 0 };
   for (const r of rows) {
-    const c = (by[r.course] ??= { reviews: 0, good: 0, sureWrong: 0, guessRight: 0, leeches: [] });
+    const c = (by[r.course] ??= { reviews: 0, good: 0, sureWrong: 0, guessRight: 0, leeches: [], touched: false });
     const log = JSON.parse(r.log);
     for (const l of log) {
       if (l.review >= since) { c.reviews++; if (l.rating >= Rating.Good) c.good++; }
+      if (l.review >= sessionStart) c.touched = true;
       if (l.result === "wrong" && l.confidence === 3) { c.sureWrong++; all.sureWrong++; }
       if (l.result === "correct" && l.confidence === 1) { c.guessRight++; all.guessRight++; }
     }
-    if (r.suspended && log.length >= LEECH_LAPSES) c.leeches.push(r.question);
+    if (r.suspended && isLeech(revive(JSON.parse(r.card)), log)) c.leeches.push(r.question);
   }
   for (const [course, c] of Object.entries(by)) {
-    const p = readProfile(course); if (!p) continue;
-    p.fm.calibration = `Across all courses: sure and wrong ${all.sureWrong}, guessing and right ${all.guessRight}. This course: ${c.sureWrong} and ${c.guessRight}.`;
-    if (c.reviews >= 10) p.fm.retention = Math.round((c.good / c.reviews) * 100) / 100;
-    if (c.leeches.length) p.fm.leeches = c.leeches;
-    writeProfile(p);
+    if (!c.touched) continue;
+    const patch: Record<string, unknown> = {
+      review_calibration: `Across all courses: sure and wrong ${all.sureWrong}, guessing and right ${all.guessRight}. This course: ${c.sureWrong} and ${c.guessRight}.`,
+      leeches: c.leeches.length ? c.leeches.sort() : undefined,
+    };
+    if (c.reviews >= 10) patch.retention = Math.round((c.good / c.reviews) * 100) / 100;
+    patchProfile(course, patch);
   }
 }
 
@@ -152,15 +184,24 @@ export function addVariant(course: string, question: string, type: "mcq" | "shor
   state.card(course, question);
   return null;
 }
+// Variant generation is best effort: two failed attempts per card (until restart) and at most a few
+// requests per queue load, so a logged-out `claude` never fans out into dozens of failing processes.
+const MAX_VARIANT_ATTEMPTS = 2, VARIANTS_PER_LOAD = 4;
 const pendingVariants = new Set<string>();
-export const wantsVariant = (course: string, question: string, reviews: number, count: number) => reviews >= 1 && count < MAX_VARIANTS && !pendingVariants.has(`${course}:${question}`);
+const variantAttempts = new Map<string, number>();
+export const wantsVariant = (course: string, question: string, reviews: number, count: number) => {
+  const k = `${course}:${question}`;
+  return reviews >= 1 && count < MAX_VARIANTS && !pendingVariants.has(k) && (variantAttempts.get(k) ?? 0) < MAX_VARIANT_ATTEMPTS;
+};
 export const markVariantPending = (course: string, question: string, pending: boolean) => { const k = `${course}:${question}`; pending ? pendingVariants.add(k) : pendingVariants.delete(k); };
+export const markVariantFailed = (course: string, question: string) => { const k = `${course}:${question}`; variantAttempts.set(k, (variantAttempts.get(k) ?? 0) + 1); };
 
-// Which wording to ask this time: the original one time in four, else rotate through the variants.
-function pickVariant(reviews: number, variants: Variant[], prefer: boolean): number | null {
-  if (!variants.length || reviews < 1) return null;
+// Which wording to ask this time: the original on the first review and one time in four after that,
+// else the variant after the one asked last.
+function pickVariant(reviews: number, lastVariant: number, variants: Variant[], prefer: boolean): number | null {
+  if (!variants.length || reviews < 2) return null;
   if (!prefer && reviews % 4 === 3) return null;
-  return reviews % variants.length;
+  return (lastVariant + 1) % variants.length;
 }
 
 // Pull a quiz block out of a doc by id.
@@ -173,7 +214,7 @@ export async function question(course: string, doc: string, qid: string) {
   return null;
 }
 
-type Row = { course: string; question: string; doc: string; module: string | null; due: string; streak: number; state: CardState; log: string; card: string; variants: string };
+type Row = { course: string; question: string; doc: string; module: string | null; due: string; streak: number; state: CardState; log: string; card: string; variants: string; last_variant: number };
 export type QueueItem = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: CardState; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: any; spec: any };
 
 async function resolve(rows: Row[], prefer = false): Promise<QueueItem[]> {
@@ -187,7 +228,7 @@ async function resolve(rows: Row[], prefer = false): Promise<QueueItem[]> {
     const file = r.doc.split("/").slice(2).join("/");
     const log = JSON.parse(r.log), last = log.at(-1);
     const variants: Variant[] = JSON.parse(r.variants ?? "[]");
-    const vi = pickVariant(log.length, variants, prefer);
+    const vi = pickVariant(log.length, r.last_variant ?? -1, variants, prefer);
     const asked = vi === null ? spec : { ...spec, prompt: variants[vi].prompt, rubric: variants[vi].rubric ?? spec.rubric, options: variants[vi].options ?? spec.options, answer: variants[vi].answer ?? spec.answer, explanation: variants[vi].explanation ?? spec.explanation };
     items.push({
       course: r.course, courseTitle: c?.title ?? r.course, question: r.question, doc: r.doc, module: r.module,
@@ -212,10 +253,11 @@ function interleave(items: QueueItem[]): QueueItem[] {
 export type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
 
 // Daily: due cards (sure-and-wrong first), interleaved, capped; topped up with the oldest
-// never-reviewed cards when fewer than 8 are due. Ad hoc modes ignore due dates.
+// never-reviewed cards when fewer than 8 are due. Ad hoc modes ignore due dates; course, module and
+// cram serve the whole set, burst ten, weak spots twenty.
 export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; exclude?: string[] } = {}) {
   const mode = opts.mode ?? "daily";
-  const cap = opts.cap ?? (mode === "burst" ? 10 : getSetting("dailyCap", 20));
+  const cap = opts.cap ?? (mode === "daily" ? getSetting("dailyCap", 20) : mode === "burst" ? 10 : mode === "weak" ? 20 : Infinity);
   const excl = new Set(opts.exclude ?? []);
   const key = (r: Row) => `${r.course}:${r.question}`;
   const base = "suspended=0 AND state<>'orphaned'";
@@ -223,6 +265,7 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   let scopeWhere = "";
   if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = " AND course=?"; args.push(opts.scope!); }
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
+  if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
   if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=? ORDER BY due`).all(...args, now()) as Row[];
   else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base} ORDER BY random() LIMIT ?`).all(cap) as Row[];
   else if (mode === "weak") rows = await weakRows();
@@ -239,8 +282,9 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   }
   const totalDue = mode === "daily" ? (db.query(`SELECT count(*) n FROM cards WHERE ${base}${scopeWhere} AND due<=?`).get(...args, now()) as any).n : rows.length;
   const next = (db.query(`SELECT min(due) d FROM cards WHERE ${base}${scopeWhere} AND due>?`).get(...args, now()) as any).d;
-  // Ask for variants in the background for cards that will be seen again.
-  for (const it of items) if (wantsVariant(it.course, it.question, it.reviews, it.variantCount)) onVariantWanted?.(it);
+  // Ask for variants in the background for cards that will be seen again, a few per load.
+  let asked = 0;
+  for (const it of items) if (asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
   return { mode, scope: opts.scope ?? null, items, dueCount: totalDue, remaining: Math.max(0, totalDue - excl.size - items.length + topped), topped, next };
 }
 let onVariantWanted: ((it: QueueItem) => void) | null = null;
@@ -306,7 +350,7 @@ export function updateSession(sid: string, patch: { reviewed?: number; correct?:
   db.run("UPDATE review_sessions SET reviewed=?, correct=?, sure_wrong=?, ended_at=? WHERE id=?",
     [patch.reviewed ?? r.reviewed, patch.correct ?? r.correct, patch.sureWrong ?? r.sure_wrong, patch.end ? now() : r.ended_at, sid]);
   state.session(sid);
-  if (patch.end) try { updateProfiles(); } catch (e) { console.warn("profile update:", (e as Error).message); }
+  if (patch.end && (patch.reviewed ?? r.reviewed) > 0) try { updateProfiles(r.started_at); } catch (e) { console.warn("profile update:", (e as Error).message); }
   return db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(sid);
 }
 export const lastSession = () => db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE reviewed>0 ORDER BY started_at DESC LIMIT 1").get();
@@ -360,19 +404,17 @@ export function mastery(course: string) {
 // Fit FSRS weights to this learner's review log (fsrs-rs), store them, and reschedule every card.
 export async function optimize(): Promise<{ ok: boolean; message: string; reviews: number }> {
   const rows = db.query("SELECT course, question, log FROM cards").all() as any[];
-  let total = 0;
-  const { FSRS, FSRSItem, FSRSReview } = await import("fsrs-rs-nodejs");
-  const items: any[] = [];
-  for (const r of rows) {
-    const log = JSON.parse(r.log).filter((l: any) => l.review);
-    if (log.length < 2) continue;
-    let prev: Date | null = null;
-    const reviews = log.map((l: any) => { const d = new Date(l.review); const delta = prev ? Math.round((+d - +prev) / 864e5) : 0; prev = d; return new FSRSReview(l.rating, delta); });
-    total += reviews.length;
-    for (let i = 2; i <= reviews.length; i++) items.push(new FSRSItem(reviews.slice(0, i)));
-  }
+  const logs = rows.map((r) => JSON.parse(r.log).filter((l: any) => l.review).sort((a: any, b: any) => (a.review < b.review ? -1 : a.review > b.review ? 1 : 0))).filter((l) => l.length >= 2);
+  const total = logs.reduce((n, l) => n + l.length, 0);
   if (total < 400) return { ok: false, message: `Need about 400 reviews to fit weights; have ${total}.`, reviews: total };
   try {
+    const { FSRS, FSRSItem, FSRSReview } = await import("fsrs-rs-nodejs");   // native binding: may be missing on this platform
+    const items: any[] = [];
+    for (const log of logs) {
+      let prev: Date | null = null;
+      const reviews = log.map((l: any) => { const d = new Date(l.review); const delta = prev ? Math.max(0, Math.round((+d - +prev) / 864e5)) : 0; prev = d; return new FSRSReview(l.rating, delta); });
+      for (let i = 2; i <= reviews.length; i++) items.push(new FSRSItem(reviews.slice(0, i)));
+    }
     const w = await new FSRS(null).computeParameters(items);
     setSetting("weights", Array.from(w)); setSetting("optimizedAt", now());
     reschedule();
@@ -382,12 +424,12 @@ export async function optimize(): Promise<{ ok: boolean; message: string; review
 // Recompute every card's schedule from its log under the current retention and weights.
 export function reschedule() {
   const f = scheduler();
-  for (const r of db.query("SELECT course, question, log, streak, suspended FROM cards").all() as any[]) {
+  for (const r of db.query("SELECT course, question, log, streak, suspended, state FROM cards").all() as any[]) {
     const log = JSON.parse(r.log).filter((l: any) => l.review);
     if (!log.length) continue;
     let card = createEmptyCard(new Date(log[0].review));
     for (const l of log) card = f.next(card, new Date(l.review), l.rating).card;
-    const st = stateOf(card, r.streak, log.length, !!r.suspended);
+    const st = r.state === "orphaned" ? "orphaned" : stateOf(card, r.streak, log.length, !!r.suspended);   // only resolve() un-orphans
     db.run("UPDATE cards SET due=?, card=?, state=?, updated_at=? WHERE course=? AND question=?", [card.due.toISOString(), JSON.stringify(card), st, now(), r.course, r.question]);
     state.card(r.course, r.question);
   }
@@ -406,7 +448,7 @@ export function stats() {
       if (!l.review) continue;
       const t = +new Date(l.review);
       if (t >= since) { const d = l.review.slice(0, 10); const x = (perDay[d] ??= { reviews: 0, good: 0 }); x.reviews++; if (l.rating >= Rating.Good) x.good++; }
-      if (t >= sinceW) { const dt = new Date(t); dt.setDate(dt.getDate() - dt.getDay()); const w = dt.toISOString().slice(0, 10); const x = (perWeek[w] ??= { reviews: 0, good: 0 }); x.reviews++; if (l.rating >= Rating.Good) x.good++; }
+      if (t >= sinceW) { const dt = new Date(t); dt.setUTCDate(dt.getUTCDate() - dt.getUTCDay()); const w = dt.toISOString().slice(0, 10); const x = (perWeek[w] ??= { reviews: 0, good: 0 }); x.reviews++; if (l.rating >= Rating.Good) x.good++; }
     }
   }
   const days = []; for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); days.push({ day: d, ...(perDay[d] ?? { reviews: 0, good: 0 }) }); }

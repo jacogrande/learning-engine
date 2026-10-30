@@ -57,7 +57,7 @@ export function StatsPage() {
           </select>
         </label>
         <div>
-          <button onClick={async () => { setMsg("Fitting…"); const r = await post<{ ok: boolean; message: string }>("/api/review/optimize"); setMsg(r.message); reload(); }}>Fit weights to my reviews</button>
+          <button onClick={async () => { setMsg("Fitting…"); try { const r = await post<{ ok: boolean; message: string }>("/api/review/optimize"); setMsg(r.message); } catch (e) { setMsg(`Optimizer failed (${String(e)}). See the server log.`); } reload(); }}>Fit weights to my reviews</button>
           <small className="muted">{s.settings.weights ? `Fitted ${new Date(s.settings.optimizedAt!).toLocaleDateString()}.` : "Using default FSRS weights."} Needs about 400 reviews.</small>
           {msg && <p className="muted">{msg}</p>}
         </div>

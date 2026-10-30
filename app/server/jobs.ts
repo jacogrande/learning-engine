@@ -1,5 +1,6 @@
-// Runs Claude Code headlessly. Two lanes: heavy (generation, minutes) and light (grading, chat,
-// seconds), one job at a time per lane so a chat never waits behind a module build.
+// Runs Claude Code headlessly. Three lanes: heavy (generation, minutes), light (grading, chat,
+// seconds) and background (review variants), one job at a time per lane so a chat never waits
+// behind a module build and a grade never waits behind a batch of variants.
 import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -9,7 +10,8 @@ import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
 export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant";
-type Lane = "heavy" | "light";
+type Lane = "heavy" | "light" | "background";
+const LANES: Lane[] = ["heavy", "light", "background"];
 export type Job = {
   id: string; course: string; kind: JobKind; ref?: string;
   status: "queued" | "running" | "done" | "failed" | "cancelled" | "interrupted";
@@ -24,7 +26,7 @@ type Opts = {
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "light" };
+const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background" };
 const TOOLS: Record<JobKind, string> = {
   start: "Read,Glob,Write,Agent,WebSearch,WebFetch",
   assess: "Read,Glob,Write",
@@ -43,15 +45,15 @@ const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, out
 const LOG_DIR = join(ROOT, "data/jobs");
 mkdirSync(LOG_DIR, { recursive: true });
 
-const queues: Record<Lane, Queued[]> = { heavy: [], light: [] };
-const current: Record<Lane, { job: Queued; child: ChildProcess } | null> = { heavy: null, light: null };
+const queues: Record<Lane, Queued[]> = { heavy: [], light: [], background: [] };
+const current: Record<Lane, { job: Queued; child: ChildProcess } | null> = { heavy: null, light: null, background: null };
 const cancelled = new Set<string>();
 
 // Anything still marked running/queued when the server starts did not survive the last process.
 db.run("UPDATE jobs SET status='interrupted', finished_at=? WHERE status IN ('running','queued')", [now()]);
 for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, async () => {
-    for (const lane of ["heavy", "light"] as Lane[]) {
+    for (const lane of LANES) {
       const c = current[lane];
       if (c) { killTree(c.child); finish(c.job, "interrupted"); c.job._opts.fail?.(c.job); }
       for (const j of queues[lane]) { finish(j, "interrupted"); j._opts.fail?.(j); }
@@ -60,7 +62,7 @@ for (const sig of ["SIGINT", "SIGTERM"] as const)
     process.exit(0);
   });
 
-export const jobs = () => (["heavy", "light"] as Lane[]).flatMap((l) => [...(current[l] ? [current[l]!.job] : []), ...queues[l]]).map(pub);
+export const jobs = () => LANES.flatMap((l) => [...(current[l] ? [current[l]!.job] : []), ...queues[l]]).map(pub);
 export const jobLog = (jobId: string) => { try { return readFileSync(join(LOG_DIR, `${jobId}.log`), "utf8").split("\n").filter(Boolean); } catch { return []; } };
 const log = (jobId: string, line: string) => appendFileSync(join(LOG_DIR, `${jobId}.log`), line + "\n");
 
@@ -82,10 +84,10 @@ export function enqueue(course: string, kind: JobKind, prompt: string, opts: Opt
 const killTree = (child: ChildProcess) => { try { process.kill(-child.pid!, "SIGTERM"); } catch { child.kill("SIGTERM"); } };
 
 export function cancel(jobId: string) {
-  for (const lane of ["heavy", "light"] as Lane[]) {
+  for (const lane of LANES) {
     if (current[lane]?.job.id === jobId) { cancelled.add(jobId); killTree(current[lane]!.child); }
     const i = queues[lane].findIndex((j) => j.id === jobId);
-    if (i >= 0) finish(queues[lane].splice(i, 1)[0], "cancelled");
+    if (i >= 0) { const j = queues[lane].splice(i, 1)[0]; finish(j, "cancelled"); j._opts.fail?.(j); }
   }
 }
 

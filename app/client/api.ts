@@ -20,7 +20,7 @@ export type Job = { id: string; course: string; kind: "start" | "assess" | "outl
 
 export const get = <T,>(url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 const send = (method: string) => <T,>(url: string, body?: unknown) =>
-  fetch(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined, keepalive: true }).then((r) => r.json() as Promise<T>);
+  fetch(url, { method, headers: { "content-type": "application/json" }, body: body ? JSON.stringify(body) : undefined, keepalive: true }).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 export const post = send("POST"), put = send("PUT"), del = send("DELETE");
 
 // One EventSource for the app; listeners subscribe by event type.

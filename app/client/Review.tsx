@@ -11,6 +11,8 @@ type Summary = { dueCount: number; total: number; learned: number; suspended: nu
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
 type Queue = { mode: Mode; scope: string | null; items: Item[]; dueCount: number; remaining: number; topped: number; next: string | null; summary: Summary; last: Session | null };
+type CardStatus = { due: string; streak: number; state: string; reviews: number; last: { result: Answer["result"]; note: string | null; confidence: number | null; variant: number | null; review: string | null } | null };
+type Saved = Answer & { due?: string };
 
 const relTime = (iso: string | null) => {
   if (!iso) return "";
@@ -23,11 +25,13 @@ const MODE_LABEL: Record<Mode, string> = { daily: "Due today", course: "Course",
 export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: string; mode?: Mode; scope?: string }) {
   const mode: Mode = modeProp ?? "daily";
   const scope = scopeProp ?? slug;
+  // The course this page is about, if any: what the header counts and the dummy-card buttons act on.
+  const courseScope = slug ?? (mode === "daily" || mode === "course" ? scope : mode === "module" || mode === "cram" ? scope?.split("/")[0] : undefined);
   const { data: course } = useLive<Course>(slug ? `/api/courses/${slug}` : null);
   const { data: courses } = useLive<Course[]>("/api/courses");
   const [q, setQ] = useState<Queue | null>(null);
   const [i, setI] = useState(0);
-  const [saved, setSaved] = useState<Record<string, Answer>>({});
+  const [saved, setSaved] = useState<Record<string, Saved>>({});   // keyed by course:question — two courses may share question ids
   const [showOriginal, setShowOriginal] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
   const sessionRef = useRef<Session | null>(null);
@@ -44,7 +48,8 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     setQ((prev) => (more && prev ? { ...r, items: [...prev.items, ...r.items] } : r));
     if (!more) setI(0);
   }, [mode, scope]);
-  useEffect(() => { served.current = []; tally.current = { reviewed: 0, correct: 0, sureWrong: 0, pending: new Set() }; sessionRef.current = null; setSession(null); setSaved({}); load(); }, [load]);
+  const restart = useCallback(() => { for (const t of Object.values(timers.current)) clearInterval(t); timers.current = {}; served.current = []; tally.current = { reviewed: 0, correct: 0, sureWrong: 0, pending: new Set() }; sessionRef.current = null; setSession(null); setSaved({}); setQ(null); load(); }, [load]);
+  useEffect(() => { restart(); }, [restart]);
   useEffect(() => () => { for (const t of Object.values(timers.current)) clearInterval(t); }, []);
   useEffect(() => { setShowOriginal(false); }, [i]);
 
@@ -59,10 +64,10 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   const item = q?.items[i];
   const key = (it: Item) => `${it.course}:${it.question}`;
 
-  const record = (it: Item, a: Answer) => {
+  const record = (it: Item, a: Saved) => {
     const t = tally.current;
     if (a.result && t.pending.has(key(it))) { t.pending.delete(key(it)); if (a.result === "correct") t.correct++; if (a.result === "wrong" && a.confidence === 3) t.sureWrong++; }
-    setSaved((s) => ({ ...s, [it.question]: a }));
+    setSaved((s) => ({ ...s, [key(it)]: a }));
     syncSession();
   };
   const submit = useCallback((spec: QuizSpec, answer: string, confidence: number) => {
@@ -70,16 +75,18 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     const it = item, t = tally.current;
     t.reviewed++; t.pending.add(key(it));
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
-    setSaved((s) => ({ ...s, [spec.id]: { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null } }));
-    post(`/api/courses/${it.course}/answers`, { question: spec.id, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant }).then(() => {
-      // Grading is async for short answers; poll this doc until the note (and the new due date) lands, bounded.
+    const pending: Saved = { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null };
+    setSaved((s) => ({ ...s, [key(it)]: pending }));
+    post<{ review: { due: string } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant }).then((r) => {
+      if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due });   // MCQ: rated at once
+      // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
+      // card stays "grading" in the tally rather than being counted as answered with no result.
       let tries = 0;
       clearInterval(timers.current[key(it)]);
-      timers.current[key(it)] = setInterval(() => get<(Answer & { due?: string })[]>(`/api/courses/${it.course}/answers?doc=${it.doc}`).then((as) => {
-        const a = as.find((x) => x.question === it.question);
-        const done = a && (spec.type === "mcq" ? !!a.due : !!a.note);
-        if (done || ++tries > 80) { clearInterval(timers.current[key(it)]); if (a) record(it, a); }
-      }), spec.type === "mcq" ? 300 : 1500);
+      timers.current[key(it)] = setInterval(() => get<CardStatus>(`/api/review/cards/${it.course}/${it.question}`).then((c) => {
+        if (c.reviews > it.reviews && c.last) { clearInterval(timers.current[key(it)]); record(it, { ...pending, result: c.last.result, note: c.last.note, gradedAt: c.last.review, due: c.due }); }
+        else if (++tries > 80) clearInterval(timers.current[key(it)]);
+      }, () => { if (++tries > 80) clearInterval(timers.current[key(it)]); }), 1500);
     });
   }, [item]);
 
@@ -134,19 +141,19 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
           {mode !== "daily" && <Link to={slug ? `/c/${slug}/review` : "/review"} className="btn">Due today</Link>}
           {q.last && q.last.id !== session?.id && <span className="muted">Last session: {q.last.reviewed} reviewed, {q.last.correct} right · {new Date(q.last.startedAt).toLocaleDateString()}</span>}
         </div>
-        <ModeMenu courses={courses ?? []} current={{ mode, scope: scope ?? null }} />
+        <ModeMenu courses={courses ?? []} current={{ mode, scope: scope ?? null }} restart={restart} />
         <div className="actions">
-          <button onClick={async () => { served.current = []; const r = await post<{ added: number }>("/api/review/seed", { course: slug }); if (r.added) load(); else alert("Every question already has a card."); }} title="One card per quiz question in your modules, due now, so you can try review before answering lessons">Add dummy cards</button>
-          {s.seeded > 0 && <button className="link" onClick={async () => { await post("/api/review/seed/clear", { course: slug }); served.current = []; load(); }}>Remove {s.seeded} unreviewed dummy card{s.seeded === 1 ? "" : "s"}</button>}
+          <button onClick={async () => { const r = await post<{ added: number }>("/api/review/seed", { course: courseScope }); if (r.added) restart(); else alert("Every question already has a card."); }} title={`One card per quiz question in ${courseScope ? "this course's" : "your"} modules, due now, so you can try review before answering lessons`}>Add dummy cards</button>
+          {s.seeded > 0 && <button className="link" onClick={async () => { await post("/api/review/seed/clear", { course: courseScope }); restart(); }}>Remove {s.seeded} unreviewed dummy card{s.seeded === 1 ? "" : "s"}</button>}
           <Link to={slug ? `/c/${slug}` : "/"} className="btn">{slug ? "Outline" : "Courses"} →</Link>
         </div>
       </Shell>
     );
   }
 
-  const answered = saved[item.spec.id];
+  const answered = saved[key(item)];
   const graded = answered && (answered.result || answered.note);
-  const due = (answered as Answer & { due?: string } | undefined)?.due;
+  const due = answered?.due;
   const sectionLink = `/c/${item.course}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`;
   const tag = q.topped && i >= q.items.length - q.topped ? " · recent, not yet due" : item.reviews === 0 ? " · dummy" : "";
   return (
@@ -157,8 +164,8 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
         <span>{!slug && `${item.courseTitle} · `}<Link to={sectionLink}>{item.sectionTitle}</Link>{item.streak > 0 ? ` · ${item.streak} in a row` : ""}{item.sureWrong ? " · sure and wrong last time" : ""}</span>
       </p>
       {showOriginal && <blockquote className="source-quote">{item.original.prompt}</blockquote>}
-      <QuizGrade value={{ saved, submit }}>
-        <Quiz key={`${item.question}:${item.variant ?? "o"}`} spec={item.spec} />
+      <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit }}>
+        <Quiz key={`${key(item)}:${item.variant ?? "o"}`} spec={item.spec} />
       </QuizGrade>
       <div className="actions">
         <button className="primary review-next" disabled={!answered} onClick={next}>{i + 1 < q.items.length ? "Next →" : "Finish"}</button>
@@ -173,17 +180,21 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   );
 }
 
-// Ad hoc modes. Each starts a fresh set; grading and scheduling work as in the daily queue.
-function ModeMenu({ courses, current }: { courses: Course[]; current: { mode: Mode; scope: string | null } }) {
+// Ad hoc modes. Each starts a fresh set; grading and scheduling work as in the daily queue. Picking
+// the mode already on screen (another burst, say) restarts it in place: navigating to the same URL is a no-op.
+function ModeMenu({ courses, current, restart }: { courses: Course[]; current: { mode: Mode; scope: string | null }; restart: () => void }) {
   const [courseSel, setCourseSel] = useState(courses[0]?.slug ?? "");
   const [moduleSel, setModuleSel] = useState("");
   const mods = courses.find((c) => c.slug === (courseSel || courses[0]?.slug))?.modules.filter((m) => m.status === "ready") ?? [];
-  const go = (mode: Mode, scope?: string) => navigate(`/review?mode=${mode}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`);
+  const go = (mode: Mode, scope?: string) => {
+    if (mode === current.mode && (scope ?? null) === current.scope) return restart();
+    navigate(`/review?mode=${mode}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`);
+  };
   return (
     <div className="modes">
       <h2>More practice</h2>
       <div className="mode-row">
-        <button onClick={() => go("weak")} disabled={current.mode === "weak"}>Weak spots</button>
+        <button onClick={() => go("weak")}>Weak spots</button>
         <span className="muted">Lapsed in the last month, partial or unmet objectives, or recorded error patterns. Up to 20.</span>
       </div>
       <div className="mode-row">
