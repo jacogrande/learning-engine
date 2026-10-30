@@ -19,8 +19,8 @@ async function tree(dir: string): Promise<Node[]> {
     if (e.isDirectory()) {
       const children = await tree(full);
       if (children.length) nodes.push({ name: e.name, path: rel, children });
-    } else if (extname(e.name) === ".md") {
-      nodes.push({ name: basename(e.name, ".md"), path: rel });
+    } else if (extname(e.name) === ".md" || extname(e.name) === ".html") {
+      nodes.push({ name: basename(e.name, extname(e.name)), path: rel });
     }
   }
   // folders first, then files
@@ -149,7 +149,7 @@ function page(title: string, sidebar: string, body: string): string {
 const MIME: Record<string, string> = {
   ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif",
   ".svg": "image/svg+xml", ".webp": "image/webp", ".pdf": "application/pdf",
-  ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".txt": "text/plain",
+  ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".txt": "text/plain", ".html": "text/html; charset=utf-8",
 };
 
 Bun.serve({
