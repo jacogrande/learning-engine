@@ -26,16 +26,16 @@ Write `modules/<id>/research/test-plan.md`: per objective, one transfer case fro
 
 ## 4. Sections
 
-Write 4–8 files `modules/<id>/NN-<two-to-four-word-slug>.md`, one at a time, in reading order. One idea per file; an objective usually takes two. Each file, in this order:
+Write 3–6 files `modules/<id>/NN-<two-to-four-word-slug>.md`, one at a time, in reading order. One idea per file; an objective takes one section unless it holds two distinct ideas. Never write a second section that restates the first's rule with new examples: fold the examples in or cut them. The module should take a working reader about 25 minutes. Each file, in this order:
 
 1. Frontmatter: `title` (quoted), `order`.
 2. `:::callout{type=note}`: one sentence, "After this section you can <the objective, or the part this section covers>."
 3. First section only, when an earlier module exists: a `:::callout{type=tip}` naming in one sentence what this module picks up from `carry`, then one `quiz` block (id `q-NN-r1`) re-asking the first `carry` item on a new case, before any prose.
 4. One `:::predict`.
 5. Prose per `voice.md`, at the objective's `level`: claim, mechanism, one example from the research in the learner's first domain, one failure case. Link a source inline where a claim needs one. If the section builds on an earlier one, its first sentence names what it takes from there. Every term a quiz or rubric uses is defined in bold before use, here or earlier; define the terms in `learner.md` `asks` before anything else.
-6. 1–3 `quiz` blocks per the content grammar, ids `q-NN-01` onward across the module, each with `objective:`. The last question in each section applies the idea to a case from a `domains` entry the prose did not use.
+6. 1–3 `quiz` blocks per the content grammar, ids `q-NN-01` onward across the module, each with `objective:`. At least one per section asks the learner to write or rewrite something, not only to classify. The last question in each section applies the idea to a case from a `domains` entry the prose did not use.
 
-Before each Write, check: every rule has its mechanism in the next sentence; every mentioned example is quoted in full; prose under 350 words; no banned phrases; every quiz block has `objective:` and `>-` scalars.
+Before each Write, check: every rule has its mechanism in the next sentence; every mentioned example is quoted in full; the boundary case does not contradict a rule stated earlier in the module or a rubric in its quizzes; prose under 350 words; no banned phrases; every quiz block has `objective:` and `>-` scalars. When the learner's baseline sentence or error appears, say explicitly what they got wrong and what the fixed version does to the reader.
 
 ## 5. Test
 

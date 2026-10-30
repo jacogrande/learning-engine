@@ -9,7 +9,9 @@ disable-model-invocation: true
 Course slug: $ARGUMENTS.
 
 1. Read `course.md`, `learner.md`, `research/map.md`, every file in `research/`, and `quizzes/baseline-assessment.md`.
-2. Plan 4–8 modules. Backward design: start from what the learner wants to *do* (course goals), decide what each module must leave them able to do, order by dependency. Compress what the assessment shows they have; weight what showed as a gap. Module level only — no sections, no content.
+2. Plan 4–8 modules. Backward design: start from what the learner wants to *do* (course goals), decide what each module must leave them able to do, order by dependency. Compress what the assessment shows they have; weight what showed as a gap.
+
+**Module 1 goes straight at the assessment's biggest gaps.** If a gap needs a prerequisite, teach the prerequisite inside module 1, in the smallest form that serves the gap, rather than deferring the gap to a later module. Pure vocabulary or taxonomy modules come later or not at all. Module level only — no sections, no content.
 3. Write `library/content/courses/<slug>/outline.md`. Quote every `title`, `summary` and objective string.
 
 ```markdown
@@ -25,7 +27,7 @@ modules:
     levels: [familiar, novice]   # one per objective, same order, from the assessment's facet levels
   - id: 02-…
 ---
-<Three to six sentences, to the learner: why this order, what was compressed because of the baseline, which one to three modules carry the threshold concepts from research/map.md, and where the hard parts are.>
+<Three to six sentences, to the learner: which baseline gaps module 1 targets and how, why this order, what was compressed, which one to three modules carry the threshold concepts from research/map.md, and where the hard parts are.>
 ```
 
 Each module gets 2–4 objectives, concrete and testable: later skills plan, test and judge against them. Ids are `NN-slug`, zero-padded, in order.

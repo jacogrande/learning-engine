@@ -23,7 +23,7 @@ Then 6–10 `quiz` blocks, no prose between them, ids `q-NN-t01`, `q-NN-t02`…,
 
 - **One transfer question per objective**, from the test plan's case: a situation no section used. Recall alone does not show mastery.
 - **One discrimination question per confusable pair** the module introduced; distractors from the research files' misconceptions and from `learner.md` `errors`.
-- **Two to four earlier-module questions**, interleaved, tagged with that module's objective id. Prefer `carry` items and objectives marked `partial` or `unmet`. For the first module, use the baseline's wrong answers instead.
+- **Two to four earlier-module questions**, interleaved, tagged with that module's objective id. Prefer `carry` items and objectives marked `partial` or `unmet`. Never tag a question with an objective from a module that has not been taught yet. For the first module there are no earlier modules: skip this rule, and instead re-ask one baseline question the learner got wrong, in a new case, tagged with this module's objective if it fits one, otherwise with no `objective` field.
 - Cases come from the learner's `domains`, rotating. No case from any section.
 - Default `short`. `mcq` only where plausible confusions are worth telling apart.
 
