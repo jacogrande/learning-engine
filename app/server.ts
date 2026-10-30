@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards } from "./server/review";
+import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -358,6 +358,8 @@ Bun.serve({
     "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); return json({ ok: true }); } },
     "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); return json({ ok: true }); } },
+    "/api/review/seed": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ added: await seed(course) }); } },
+    "/api/review/seed/clear": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ removed: clearSeeded(course) }); } },
     "/api/review/suspended": async (req) => json(await suspendedCards(new URL(req.url).searchParams.get("course") ?? undefined)),
 
     "/api/sync": {

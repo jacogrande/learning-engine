@@ -6,7 +6,7 @@ import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell } from "./App";
 
 type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; spec: QuizSpec };
-type Summary = { dueCount: number; total: number; learned: number; suspended: number; streak: number; next: string | null };
+type Summary = { dueCount: number; total: number; learned: number; suspended: number; seeded: number; streak: number; next: string | null };
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Queue = { items: Item[]; dueCount: number; remaining: number; topped: number; next: string | null; summary: Summary; last: Session | null };
 
@@ -116,6 +116,10 @@ export function ReviewPage({ slug }: { slug?: string }) {
         )}
         <div className="actions">
           {q.remaining > 0 && <button className="primary" onClick={() => load(true)}>+10 more</button>}
+          <button onClick={async () => { served.current = []; const r = await post<{ added: number }>("/api/review/seed", { course: slug }); if (r.added) load(); else alert("Every question already has a card."); }} title="One card per quiz question in your modules, due now, so you can try review before answering lessons">
+            Add dummy cards
+          </button>
+          {s.seeded > 0 && <button className="link" onClick={async () => { await post("/api/review/seed/clear", { course: slug }); served.current = []; load(); }}>Remove {s.seeded} unreviewed dummy card{s.seeded === 1 ? "" : "s"}</button>}
           {q.last && q.last.id !== session?.id && <span className="muted">Last session: {q.last.reviewed} reviewed, {q.last.correct} right · {new Date(q.last.startedAt).toLocaleDateString()}</span>}
           <Link to={slug ? `/c/${slug}` : "/"} className="btn">{slug ? "Outline" : "Courses"} →</Link>
         </div>
@@ -131,7 +135,7 @@ export function ReviewPage({ slug }: { slug?: string }) {
     <Shell crumbs={crumbs} className="page">
       <h1>Review</h1>{head}
       <p className="meta review-kicker">
-        <span>{i + 1} of {q.items.length}{q.topped && i >= q.items.length - q.topped ? " · recent, not yet due" : ""}</span>
+        <span>{i + 1} of {q.items.length}{q.topped && i >= q.items.length - q.topped ? " · recent, not yet due" : item.reviews === 0 ? " · dummy" : ""}</span>
         <span>{!slug && `${item.courseTitle} · `}<Link to={sectionLink}>{item.sectionTitle}</Link>{item.streak > 0 ? ` · ${item.streak} in a row` : ""}{item.sureWrong ? " · sure and wrong last time" : ""}</span>
       </p>
       <QuizGrade value={{ saved, submit }}>

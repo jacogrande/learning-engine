@@ -55,6 +55,7 @@ export const state = {
     const r = db.query("SELECT course, question, doc, module, due, card, streak, log, state, suspended, flag, updated_at updatedAt FROM cards WHERE course=? AND question=?").get(course, question) as any;
     if (r) save(file("cards", course, question), { ...r, card: JSON.parse(r.card), log: JSON.parse(r.log), suspended: !!r.suspended });
   },
+  cardDeleted: (course: string, question: string) => remove(file("cards", course, question)),
   session: (id: string) => {
     const r = db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(id);
     if (r) save(file("sessions", id), r);

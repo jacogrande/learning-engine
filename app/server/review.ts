@@ -159,6 +159,7 @@ export function summary(course?: string) {
     total: by(`SELECT count(*) n FROM cards WHERE ${where}`),
     learned: by(`SELECT count(*) n FROM cards WHERE ${where} AND state='learned'`),
     suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? " AND course=?" : ""}`),
+    seeded: seededCount(course),
     streak: streak(),
     next: (db.query(`SELECT min(due) d FROM cards WHERE ${where} AND due>'${now()}'`).get(...args) as any).d,
   };
@@ -189,6 +190,40 @@ export function updateSession(sid: string, patch: { reviewed?: number; correct?:
   return db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(sid);
 }
 export const lastSession = () => db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE reviewed>0 ORDER BY started_at DESC LIMIT 1").get();
+
+// Dummy cards: one `new` card per quiz question in every generated module, due now, with an empty
+// log. The first real answer rates it like any other card; unreviewed ones can be cleared again.
+export async function seed(course?: string) {
+  const courses = (await listCourses()).filter((c) => !course || c.slug === course);
+  let added = 0;
+  for (const c of courses) {
+    for (const m of c.modules) {
+      const files = [...m.sections.map((s) => s.file), ...(m.test ? ["quiz.md"] : []), ...m.extras.filter((e) => e.kind === "drilldown").map((e) => e.file)];
+      for (const f of files) {
+        const doc = `modules/${m.id}/${f}`;
+        const d = await getDoc(c.slug, doc);
+        if (!d) continue;
+        for (const match of d.body.matchAll(/```quiz\n([\s\S]*?)```/g)) {
+          let q: any; try { q = YAML.parse(match[1]); } catch { continue; }
+          if (!q?.id || !q.prompt) continue;
+          if (db.query("SELECT 1 FROM cards WHERE course=? AND question=?").get(c.slug, q.id)) continue;
+          const card = createEmptyCard(new Date());
+          db.run("INSERT INTO cards (course, question, doc, module, due, card, streak, log, state, suspended, updated_at) VALUES (?,?,?,?,?,?,0,'[]','new',0,?)",
+            [c.slug, q.id, doc, m.id, now(), JSON.stringify(card), now()]);
+          state.card(c.slug, q.id);
+          added++;
+        }
+      }
+    }
+  }
+  return added;
+}
+export function clearSeeded(course?: string) {
+  const rows = db.query(`SELECT course, question FROM cards WHERE log='[]'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
+  for (const r of rows) { db.run("DELETE FROM cards WHERE course=? AND question=?", [r.course, r.question]); state.cardDeleted(r.course, r.question); }
+  return rows.length;
+}
+export const seededCount = (course?: string) => (db.query(`SELECT count(*) n FROM cards WHERE log='[]'${course ? " AND course=?" : ""}`).get(...(course ? [course] : [])) as any).n;
 
 export const suspendedCards = async (course?: string) =>
   resolve(db.query(`SELECT * FROM cards WHERE suspended=1${course ? " AND course=?" : ""} ORDER BY updated_at DESC`).all(...(course ? [course] : [])) as Row[]);
