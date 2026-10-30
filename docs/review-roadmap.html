@@ -58,14 +58,14 @@
     <h2><span class="n">Step 1</span>Daily queue across courses<span class="est">½ day</span></h2>
     <p class="why">The smallest version that changes the daily habit: one place, one short session, done.</p>
     <ul>
-      <li><label><input type="checkbox" id="s1-1"><span>Global due query<small><code>due()</code> without a course filter; return course, module and section with each card.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-2"><span>Session composition<small>Cap (default 20, stored setting); interleave so no two cards from one module run back to back; top up with the oldest <code>new</code> cards when fewer than 8 are due; never pull from a section the learner has not opened.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-3"><span>Order<small>Wrong-and-Sure last time comes first; then due date.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-4"><span>Route and page <code>/review</code><small>One card at a time; course · module kicker; link to the section; async grading (next card opens while the last one grades); keyboard 1/2/3 · Enter · Enter.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-5"><span>Interval feedback<small>After grading, show "next in 3 days" from the FSRS result.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-6"><span>Session record and summary<small><code>review_sessions</code> (kind, scope, reviewed, correct, sure_wrong) as state files; end screen: "14 reviewed · 10 right · 2 sure-and-wrong · next due tomorrow."</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-7"><span>Courses page line<small>"Due today: 14 · 6-day streak" above the list; streak = consecutive days with ≥1 review, from sessions.</small></span></label></li>
-      <li><label><input type="checkbox" id="s1-8"><span>Per-course Review tab becomes a filter of the same page<small>Keep the URL; render the global component scoped to the course.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-1" data-default="done"><span>Global due query<small><code>due()</code> without a course filter; return course, module and section with each card.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-2" data-default="done"><span>Session composition<small>Cap (default 20, stored setting); interleave so no two cards from one module run back to back; top up with the oldest <code>new</code> cards when fewer than 8 are due; never pull from a section the learner has not opened.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-3" data-default="done"><span>Order<small>Wrong-and-Sure last time comes first; then due date.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-4" data-default="done"><span>Route and page <code>/review</code><small>One card at a time; course · module kicker; link to the section; async grading (next card opens while the last one grades); keyboard 1/2/3 · Enter · Enter.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-5" data-default="done"><span>Interval feedback<small>After grading, show "next in 3 days" from the FSRS result.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-6" data-default="done"><span>Session record and summary<small><code>review_sessions</code> (kind, scope, reviewed, correct, sure_wrong) as state files; end screen: "14 reviewed · 10 right · 2 sure-and-wrong · next due tomorrow."</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-7" data-default="done"><span>Courses page line<small>"Due today: 14 · 6-day streak" above the list; streak = consecutive days with ≥1 review, from sessions.</small></span></label></li>
+      <li><label><input type="checkbox" id="s1-8" data-default="done"><span>Per-course Review tab becomes a filter of the same page<small>Keep the URL; render the global component scoped to the course.</small></span></label></li>
     </ul>
     <p class="gate"><b>Done when:</b> on a morning with cards due in two courses, one visit to <code>/review</code> works through them interleaved and ends in under 15 minutes with a summary.</p>
   </section>
@@ -74,11 +74,11 @@
     <h2><span class="n">Step 2</span>Card lifecycle<span class="est">½ day</span></h2>
     <p class="why">Without this a bad card or a dead section haunts the queue forever.</p>
     <ul>
-      <li><label><input type="checkbox" id="s2-1"><span>State column<small><code>new | learning | review | learned | suspended | orphaned</code> derived on write; <code>learned</code> = streak ≥ 3 in Review.</small></span></label></li>
-      <li><label><input type="checkbox" id="s2-2"><span>Suspend<small>× on a card ("stop asking this"); unsuspend from a list on the review page.</small></span></label></li>
-      <li><label><input type="checkbox" id="s2-3"><span>Leech<small>Six lapses → suspended; append the card to <code>learner.md</code> <code>errors</code> with its evidence so the next module's <code>carry</code> picks it up.</small></span></label></li>
-      <li><label><input type="checkbox" id="s2-4"><span>Orphans<small>On rebuild and after each content change, cards whose <code>id</code> no longer exists in the source doc are hidden, not deleted.</small></span></label></li>
-      <li><label><input type="checkbox" id="s2-5"><span>Flag a wrong grade<small>Writes a note the next <code>/grade</code> run on that question reads; shows in the card's log.</small></span></label></li>
+      <li><label><input type="checkbox" id="s2-1" data-default="done"><span>State column<small><code>new | learning | review | learned | suspended | orphaned</code> derived on write; <code>learned</code> = streak ≥ 3 in Review.</small></span></label></li>
+      <li><label><input type="checkbox" id="s2-2" data-default="done"><span>Suspend<small>× on a card ("stop asking this"); unsuspend from a list on the review page.</small></span></label></li>
+      <li><label><input type="checkbox" id="s2-3" data-default="done"><span>Leech<small>Six lapses → suspended; append the card to <code>learner.md</code> <code>errors</code> with its evidence so the next module's <code>carry</code> picks it up.</small></span></label></li>
+      <li><label><input type="checkbox" id="s2-4" data-default="done"><span>Orphans<small>On rebuild and after each content change, cards whose <code>id</code> no longer exists in the source doc are hidden, not deleted.</small></span></label></li>
+      <li><label><input type="checkbox" id="s2-5" data-default="done"><span>Flag a wrong grade<small>Writes a note the next <code>/grade</code> run on that question reads; shows in the card's log.</small></span></label></li>
     </ul>
   </section>
 
@@ -121,8 +121,8 @@
   <section>
     <h2><span class="n">Decide</span>Open questions</h2>
     <ul class="questions">
-      <li><b>Baseline questions as cards?</b><small>Proposal: no, unless the learner later answers them correctly in a module.</small></li>
-      <li><b>Daily cap: hard stop or "10 more"?</b><small>Proposal: hard on the daily page, unlimited in ad hoc.</small></li>
+      <li><b>Baseline questions as cards?</b><small>Decided: no. Baseline docs never create cards.</small></li>
+      <li><b>Daily cap: hard stop or "10 more"?</b><small>Decided: soft. The daily page ends at the cap and offers +10 more.</small></li>
       <li><b>MCQ variants: new options or new stem?</b><small>Proposal: change the case in the stem, keep the misconceptions, let wording vary.</small></li>
     </ul>
   </section>
@@ -135,7 +135,7 @@
   let state = {}; try { state = JSON.parse(localStorage.getItem(KEY) || "{}"); } catch {}
   const paint = () => {
     let done = 0;
-    for (const b of boxes) { b.checked = !!state[b.id]; b.closest("li").classList.toggle("done", b.checked); if (b.checked) done++; }
+    for (const b of boxes) { b.checked = b.id in state ? !!state[b.id] : b.dataset.default === "done"; b.closest("li").classList.toggle("done", b.checked); if (b.checked) done++; }
     document.getElementById("bar").style.width = (100 * done / boxes.length) + "%";
     document.getElementById("count").textContent = `${done} of ${boxes.length}`;
   };

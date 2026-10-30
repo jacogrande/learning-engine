@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, due, question, mastery } from "./server/review";
+import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -219,7 +219,8 @@ Bun.serve({
 
     // --- in-lesson answers ---------------------------------------------
     "/api/courses/:slug/answers": {
-      GET: (req) => json(db.query("SELECT question, answer, result, note, job, confidence, graded_at gradedAt FROM answers WHERE course=? AND doc=?").all(req.params.slug, q(req, "doc"))),
+      GET: (req) => json(db.query(`SELECT a.question, a.answer, a.result, a.note, a.job, a.confidence, a.graded_at gradedAt, c.due, c.state
+                                   FROM answers a LEFT JOIN cards c ON c.course=a.course AND c.question=a.question WHERE a.course=? AND a.doc=?`).all(req.params.slug, q(req, "doc"))),
       // Confidence is recorded before feedback; the result feeds the spaced-review schedule.
       POST: async (req) => {
         const slug = req.params.slug;
@@ -227,7 +228,8 @@ Bun.serve({
         let job: string | null = null;
         const jobRef = { id: "" };
         if (type === "short") {
-          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}`, {
+          const flag = flagOf(slug, qid);
+          job = jobRef.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
             ref: qid, schema: GRADE_SCHEMA,
             then: (g: any) => {
               // Only if this is still the answer the job graded (the learner may have re-checked since).
@@ -344,7 +346,19 @@ Bun.serve({
         return json(job);
       },
     },
-    "/api/courses/:slug/review": async (req) => json({ ...(await due(req.params.slug)), mastery: mastery(req.params.slug) }),
+    "/api/courses/:slug/review": async (req) => json({ ...summary(req.params.slug), mastery: mastery(req.params.slug) }),
+    "/api/review/summary": () => json(summary()),
+    "/api/review": async (req) => {
+      const u = new URL(req.url);
+      const exclude = (u.searchParams.get("exclude") ?? "").split(",").filter(Boolean);
+      const course = u.searchParams.get("course") ?? undefined;
+      return json({ ...(await queue({ course, cap: Number(u.searchParams.get("cap") ?? 20), exclude })), summary: summary(course), last: lastSession() });
+    },
+    "/api/review/sessions": { POST: async (req) => { const { kind, scope } = (await req.json()) as { kind: string; scope?: string }; return json(startSession(kind, scope ?? null)); } },
+    "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
+    "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); return json({ ok: true }); } },
+    "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); return json({ ok: true }); } },
+    "/api/review/suspended": async (req) => json(await suspendedCards(new URL(req.url).searchParams.get("course") ?? undefined)),
 
     "/api/sync": {
       GET: () => json(sync.status),

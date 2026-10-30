@@ -52,15 +52,19 @@ export const state = {
     if (r) save(file("progress", course, module), { ...r, data: JSON.parse(r.data) });
   },
   card: (course: string, question: string) => {
-    const r = db.query("SELECT course, question, doc, module, due, card, streak, log, updated_at updatedAt FROM cards WHERE course=? AND question=?").get(course, question) as any;
-    if (r) save(file("cards", course, question), { ...r, card: JSON.parse(r.card), log: JSON.parse(r.log) });
+    const r = db.query("SELECT course, question, doc, module, due, card, streak, log, state, suspended, flag, updated_at updatedAt FROM cards WHERE course=? AND question=?").get(course, question) as any;
+    if (r) save(file("cards", course, question), { ...r, card: JSON.parse(r.card), log: JSON.parse(r.log), suspended: !!r.suspended });
+  },
+  session: (id: string) => {
+    const r = db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(id);
+    if (r) save(file("sessions", id), r);
   },
 };
 
 // --- rebuild: files → SQLite ----------------------------------------------
 export function rebuild() {
   const run = db.transaction(() => {
-    for (const t of ["answers", "annotations", "attempts", "progress", "cards"]) db.run(`DELETE FROM ${t}`);
+    for (const t of ["answers", "annotations", "attempts", "progress", "cards", "review_sessions"]) db.run(`DELETE FROM ${t}`);
     for (const p of walk(join(STATE_DIR, "answers"))) {
       const r = load(p); if (!r) continue;
       db.run("INSERT OR REPLACE INTO answers (course, question, doc, answer, result, note, job, confidence, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -80,8 +84,13 @@ export function rebuild() {
     }
     for (const p of walk(join(STATE_DIR, "cards"))) {
       const r = load(p); if (!r) continue;
-      db.run("INSERT OR REPLACE INTO cards (course, question, doc, module, due, card, streak, log, updated_at) VALUES (?,?,?,?,?,?,?,?,?)",
-        [r.course, r.question, r.doc, r.module ?? null, r.due, JSON.stringify(r.card), r.streak ?? 0, JSON.stringify(r.log ?? []), r.updatedAt]);
+      db.run("INSERT OR REPLACE INTO cards (course, question, doc, module, due, card, streak, log, state, suspended, flag, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+        [r.course, r.question, r.doc, r.module ?? null, r.due, JSON.stringify(r.card), r.streak ?? 0, JSON.stringify(r.log ?? []), r.state ?? "new", r.suspended ? 1 : 0, r.flag ?? null, r.updatedAt]);
+    }
+    for (const p of walk(join(STATE_DIR, "sessions"))) {
+      const r = load(p); if (!r) continue;
+      db.run("INSERT OR REPLACE INTO review_sessions (id, kind, scope, started_at, ended_at, reviewed, correct, sure_wrong) VALUES (?,?,?,?,?,?,?,?)",
+        [r.id, r.kind, r.scope ?? null, r.startedAt, r.endedAt ?? null, r.reviewed ?? 0, r.correct ?? 0, r.sureWrong ?? 0]);
     }
     // Chats are upserted, not truncated: session_id is a local handle the file does not carry.
     for (const p of walk(join(STATE_DIR, "chats"))) {

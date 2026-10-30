@@ -22,6 +22,7 @@ export const Link = ({ to, children, className }: { to: string; children: ReactN
 
 export function App() {
   const path = usePath();
+  if (path === "/review") return <><ReviewPage /><JobBar /></>;
   const m = /^\/c\/([^/]+)(?:\/(baseline|review)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
   return (
     <>
@@ -84,12 +85,20 @@ function Courses() {
   const jobs = useJobs();
   const starting = jobs.filter((j) => j.kind === "start");
   const [open, setOpen] = useState(false);
+  const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer"]);
   const status = (c: Course) =>
     c.stage === "baseline" ? "Baseline waiting" : c.stage === "assessed" ? "Outline pending" : `${c.modules.filter((m) => m.status === "ready").length} of ${c.modules.length} modules generated`;
   return (
     <Shell crumbs={[{ label: "Courses" }]} className="page">
       <div className="page-head"><h1>Courses</h1>{!open && <button className="primary" onClick={() => setOpen(true)}>New course</button>}</div>
       {open && <NewCourse onDone={() => setOpen(false)} />}
+      {rv && rv.total > 0 && (
+        <p className="due-line">
+          <Link to="/review">{rv.dueCount > 0 ? `Due today: ${rv.dueCount}` : "Nothing due today"}</Link>
+          {rv.streak > 0 && <span className="muted"> · {rv.streak}-day streak</span>}
+          {rv.dueCount === 0 && rv.next && <span className="muted"> · next {new Date(rv.next).toLocaleDateString()}</span>}
+        </p>
+      )}
       {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — researching the subject and writing the baseline. It appears below when ready ({j.activity ?? "queued"}).</p>)}
       {data?.length === 0 && starting.length === 0 && !open && (
         <p className="muted">No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>

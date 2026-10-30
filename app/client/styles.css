@@ -434,3 +434,11 @@ article img, .mermaid svg { max-width: 100%; }
 .new-course input, .new-course textarea, .new-course select { font: inherit; font-weight: 400; font-size: var(--fs-body); padding: var(--s-2) var(--s-3); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; resize: vertical; }
 .new-course .actions { margin-top: var(--s-1); }
 .starting { padding: var(--s-3) var(--s-4); background: var(--code); border-radius: var(--radius-2); }
+
+/* review */
+.due-line { margin: 0 0 var(--s-5); font-size: var(--fs-ui); }
+.due-line a { color: var(--fg); text-decoration: underline; text-decoration-color: var(--accent-fill); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.review-kicker { display: flex; justify-content: space-between; gap: var(--s-3); flex-wrap: wrap; }
+.review-kicker a { color: var(--fg); }
+.actions .spacer { flex: 1; }
+.keys { margin-top: var(--s-6); font-size: var(--fs-caption); letter-spacing: .02em; }
