@@ -7,19 +7,24 @@ import abcjs from "abcjs";
 import { COURSES_DIR, parseDoc } from "./content";
 import { abcSourceProblems, tidyAbc, tuneProblems, youtubeProblems } from "../shared/notation";
 
-const ID = /^q-(base-\d{2}|\d{2}-(r\d|t\d{2}|dd\d{2}|\d{2}))$/;
+const ID = /^q-(base-\d{2}|\d{2}-(r\d|t\d{2}|dd\d{2}|fc\d{2,3}|ws\d{2,3}|\d{2}))$/;
 const OBJ = /^obj-\d{2}-\d+$/;
 
 export async function lint(course: string, mod: string): Promise<string[]> {
   const dir = join(COURSES_DIR, course, "modules", mod);
-  const files = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith(".md")).sort();
+  // Sections, the test and understanding, then worksheets (practice pages: no `order`, no prose ceiling).
+  const top = (await readdir(dir).catch(() => [] as string[])).filter((f) => f.endsWith(".md")).sort();
+  const sheets = (await readdir(join(dir, "worksheets")).catch(() => [] as string[])).filter((f) => f.endsWith(".md")).sort().map((f) => `worksheets/${f}`);
+  const files = [...top, ...sheets];
   const problems: string[] = [];
   const seen = new Set<string>();
   for (const f of files) {
     const src = await readFile(join(dir, f), "utf8");
     const doc = parseDoc(src);
     if (!doc.frontmatter.title) problems.push(`${f}: no title in frontmatter`);
-    if (f !== "quiz.md" && f !== "understanding.md" && doc.frontmatter.order == null) problems.push(`${f}: no order in frontmatter`);
+    const sheet = f.startsWith("worksheets/");
+    if (!sheet && f !== "quiz.md" && f !== "understanding.md" && doc.frontmatter.order == null) problems.push(`${f}: no order in frontmatter`);
+    if (sheet && !doc.frontmatter.section) problems.push(`${f}: no section in frontmatter`);
     const fences = [...doc.body.matchAll(/```quiz\n([\s\S]*?)```/g)];
     if (!fences.length && f !== "understanding.md") problems.push(`${f}: no quiz block`);
     for (const [, body] of fences) {
@@ -40,7 +45,8 @@ export async function lint(course: string, mod: string): Promise<string[]> {
     }
     problems.push(...notation(doc.body).map((p) => `${f}: ${p}`));
     const words = doc.body.replace(/```[\s\S]*?```/g, "").replace(/:::[\s\S]*?:::/g, "").split(/\s+/).filter(Boolean).length;
-    if (f !== "quiz.md" && f !== "understanding.md" && words > 420) problems.push(`${f}: ${words} words of prose (ceiling 350)`);
+    if (sheet && fences.length < 8) problems.push(`${f}: ${fences.length} exercises; a worksheet has ten to fourteen`);
+    if (!sheet && f !== "quiz.md" && f !== "understanding.md" && words > 420) problems.push(`${f}: ${words} words of prose (ceiling 350)`);
   }
   return problems;
 }

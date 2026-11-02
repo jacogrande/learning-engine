@@ -207,11 +207,11 @@ async function sectionHint(course: string, doc: string) {
 }
 
 // After a drill-down or reading job: tell the page the new file exists, so it can offer a link.
-async function announceExtra(course: string, doc: string, kind: "drilldown" | "reading", startedAt?: string) {
+async function announceExtra(course: string, doc: string, kind: "drilldown" | "reading" | "worksheet", startedAt?: string) {
   const mod = /^modules\/([^/]+)\//.exec(doc)?.[1];
   const c = mod ? await getCourse(course) : null;
   const m = c?.modules.find((x) => x.id === mod);
-  const dir = join(COURSES_DIR, course, "modules", mod ?? "", kind === "drilldown" ? "drilldowns" : "readings");
+  const dir = join(COURSES_DIR, course, "modules", mod ?? "", `${kind}s`);
   const since = startedAt ? +new Date(startedAt) : 0;
   let newest: { file: string; t: number } | null = null;
   for (const f of await readdir(dir).catch(() => [] as string[])) {
@@ -457,6 +457,21 @@ Bun.serve({
         const { doc, quote, guidance } = (await req.json()) as { doc: string; quote: string; guidance?: string };
         const prompt = `/drill-down ${req.params.slug} ${doc}${await sectionHint(req.params.slug, doc)}\n\nSelected passage:\n${quoteBlock(quote)}${guidance ? `\n\nLearner's guidance: ${guidance}` : ""}`;
         return json(enqueue(req.params.slug, "drilldown", prompt, { ref: doc, then: (_r, job) => announceExtra(req.params.slug, doc, "drilldown", job.startedAt) }));
+      },
+    },
+    // A worksheet for a section: many exercises on it, weighted toward what the learner has missed in
+    // the section's own questions. `doc` is the section, or a worksheet made from it (another one).
+    "/api/courses/:slug/worksheet": {
+      POST: async (req) => {
+        const slug = req.params.slug, { doc: from } = (await req.json()) as { doc: string };
+        const doc = from?.includes("/worksheets/") ? `modules/${from.split("/")[1]}/${(await getDoc(slug, from))?.frontmatter.section ?? ""}` : from;
+        if (!/^modules\/[^/]+\/\d\d-[^/]+\.md$/.test(doc ?? "") || !(await getDoc(slug, doc))) return json({ error: "a section is needed" }, 400);
+        const rows = db.query("SELECT question, answer, result FROM answers WHERE course=? AND doc=?").all(slug, doc) as any[];
+        const answers = rows.length ? rows.map((r) => `- ${r.question}: ${r.result ?? "not graded yet"}. Answer: ${String(r.answer).replace(/\s+/g, " ").slice(0, 300)}`).join("\n") : "None yet.";
+        const mod = doc.split("/")[1];
+        return json(enqueue(slug, "worksheet", `/make-worksheet ${slug} ${doc}\n\nThe learner's answers to this section's questions:\n${answers}`, {
+          ref: doc, then: (_r, job) => { announceExtra(slug, doc, "worksheet", job.startedAt); lintModule(slug, mod); },
+        }));
       },
     },
     "/api/courses/:slug/reading": {

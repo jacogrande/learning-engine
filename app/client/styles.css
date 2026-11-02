@@ -313,6 +313,10 @@ ul.block-note { padding-left: var(--s-6); }
 .video-cover:hover { background: rgba(0, 0, 0, .3); border: 0; }
 .video-cover svg { width: 56px; height: 56px; padding: 14px; border-radius: 50%; fill: #fff; background: rgba(0, 0, 0, .55); }
 .video figcaption { margin-top: var(--s-2); font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--muted); }
+.practice { margin-top: var(--s-7); padding: var(--s-4) var(--s-5); border: var(--hairline) solid var(--faint); border-radius: var(--radius-3); font-family: var(--font); font-size: var(--fs-ui); line-height: var(--lh-ui); }
+.practice .actions { margin: 0; flex-wrap: wrap; }
+.practice-sheets { list-style: none; padding: 0; margin: 0 0 var(--s-3); }
+.practice-sheets li { margin: var(--s-1) 0; }
 .article-foot { margin-top: var(--s-8); padding-top: var(--s-5); border-top: var(--hairline) solid var(--faint); display: flex; justify-content: space-between; align-items: center; gap: var(--s-3); font-size: var(--fs-ui); }
 .article-foot .btn { white-space: normal; text-align: left; padding: var(--s-1) var(--s-3); }
 .article-foot .btn:last-child { text-align: right; }

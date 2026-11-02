@@ -431,7 +431,7 @@ export async function seed(course?: string) {
   let added = 0;
   for (const c of courses) {
     for (const m of c.modules) {
-      const files = [...m.sections.map((s) => s.file), ...(m.test ? ["quiz.md"] : []), ...m.extras.filter((e) => e.kind === "drilldown").map((e) => e.file)];
+      const files = [...m.sections.map((s) => s.file), ...(m.test ? ["quiz.md"] : []), ...m.extras.filter((e) => e.kind === "drilldown" || e.kind === "worksheet").map((e) => e.file)];
       for (const f of files) {
         const doc = `modules/${m.id}/${f}`;
         const d = await getDoc(c.slug, doc);

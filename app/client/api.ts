@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useSyncExternalStore } from "react";
 
 export type Section = { file: string; title: string };
-export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
+export type Extra = { file: string; title: string; kind: "drilldown" | "reading" | "worksheet"; section?: string };
 export type Objective = { id: string; text: string; status?: "met" | "partial" | "unmet"; evidence?: string };
 export type Understanding = { level?: string; summary?: string; calibration?: string; carry?: string[] };
 export type Module = { id: string; title: string; summary?: string; objectives: Objective[]; status: "planned" | "ready"; sections: Section[]; extras: Extra[]; test: boolean; understanding: Understanding | null };
@@ -20,7 +20,7 @@ export type Chat = { id: string; doc: string; kind?: "section" | "summary"; modu
 export type ChatAction = { type: "cards" | "vocab" | "lesson"; ok: boolean; text: string; to?: string | null; job?: string; undo?: unknown; undone?: boolean };
 export type Message = { id: string; role: "user" | "assistant"; content: string; actions?: ChatAction[] };
 export type SyncStatus = { repo: boolean; remote: string | null; branch: string | null; busy: string | null; dirty: boolean; lastPull: string | null; lastPush: string | null; error: string | null };
-export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
+export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson" | "worksheet"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
 
 export const get = <T,>(url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 const send = (method: string) => <T,>(url: string, body?: unknown) =>

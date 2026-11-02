@@ -9,7 +9,7 @@ import { ROOT } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
-export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson";
+export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson" | "worksheet";
 type Lane = "heavy" | "light" | "background";
 const LANES: Lane[] = ["heavy", "light", "background"];
 export type Job = {
@@ -26,7 +26,7 @@ type Opts = {
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background", lesson: "heavy" };
+const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background", lesson: "heavy", worksheet: "heavy" };
 const TOOLS: Record<JobKind, string> = {
   start: "Read,Glob,Write,Agent,WebSearch,WebFetch",
   assess: "Read,Glob,Write",
@@ -41,8 +41,9 @@ const TOOLS: Record<JobKind, string> = {
   variant: "Read",
   vocab: "Read",
   lesson: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch",
+  worksheet: "Read,Glob,Grep,Write",
 };
-const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true };
+const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true, worksheet: true };
 
 const LOG_DIR = join(ROOT, "data/jobs");
 mkdirSync(LOG_DIR, { recursive: true });

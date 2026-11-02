@@ -6,7 +6,7 @@ import { Link } from "./App";
 const label = (j: Job) => ({
   start: `Starting course: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
   test: `Writing module test ${j.ref?.split("/")[0]}`, wrap: `Wrapping up ${j.ref?.split("/")[0]}`,
-  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant", vocab: "Writing a vocab entry", lesson: "Writing a new lesson",
+  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant", vocab: "Writing a vocab entry", lesson: "Writing a new lesson", worksheet: "Writing a worksheet",
 }[j.kind]);
 
 export function JobBar() {
@@ -49,7 +49,7 @@ export function JobBar() {
 // What finished while you were reading: a drill-down or reading ready to open, or a long job that
 // failed. Stays until dismissed or opened, so it is not missed in another tab.
 type Toast = { id: number; text: string; to?: string | null; bad?: boolean };
-const NOUN: Partial<Record<Job["kind"], string>> = { start: "Starting the course", assess: "The baseline assessment", outline: "The outline", module: "Generating the module", test: "Writing the module test", wrap: "The wrap-up", drilldown: "The drill-down", reading: "The reading list", lesson: "Writing the new lesson" };
+const NOUN: Partial<Record<Job["kind"], string>> = { start: "Starting the course", assess: "The baseline assessment", outline: "The outline", module: "Generating the module", test: "Writing the module test", wrap: "The wrap-up", drilldown: "The drill-down", reading: "The reading list", lesson: "Writing the new lesson", worksheet: "Writing the worksheet" };
 let seq = 0;
 function Toasts() {
   const [list, setList] = useState<Toast[]>([]);
@@ -65,7 +65,7 @@ function Toasts() {
       else push({ text: ev.kept ? `Rewriting “${ev.title}” failed; the old entry is kept.` : `The entry for “${ev.title}” could not be written. Try again from Vocabulary.`, to: ev.to, bad: true });
       return;
     }
-    const what = ev.kind === "drilldown" ? "Drill-down" : ev.kind === "lesson" ? "New lesson" : "Reading list";
+    const what = ev.kind === "drilldown" ? "Drill-down" : ev.kind === "lesson" ? "New lesson" : ev.kind === "worksheet" ? "Worksheet" : "Reading list";
     if (ev.ok) push({ text: `${what} ready: ${ev.title}`, to: ev.to });
     else push({ text: `${what} finished, but no new page turned up. Check the module's sidebar.`, bad: true });
   }, []));

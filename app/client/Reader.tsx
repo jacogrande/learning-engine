@@ -8,7 +8,7 @@ import { Notes, type NotesHandle } from "./Notes";
 import { ChatPane } from "./Chat";
 import { Wrap } from "./Wrap";
 import { describe, paint, scrollToRange, sentenceAround, type Quote } from "./selection";
-import { capture } from "./Vocab";
+import { capture, toast } from "./Vocab";
 import { Link, NotFound, Shell } from "./App";
 
 // `around` is the word's sentence, read when the selection is made: tapping a menu button on a touch
@@ -25,6 +25,34 @@ function focusWhenShown(selector: string) {
     if ((!el || document.activeElement !== el) && Date.now() < until) setTimeout(tryIt, 40);
   };
   requestAnimationFrame(tryIt);
+}
+
+const KIND: Record<string, string> = { drilldown: "Drill-down", reading: "Reading", worksheet: "Worksheet" };
+const TAG: Record<string, string> = { drilldown: "↓", reading: "≡", worksheet: "✎" };
+
+// The end of a section (and of each worksheet made from it): its worksheets, and a button to make
+// one. A worksheet is a page of ten to fourteen exercises on the section, aimed at what the learner
+// missed in its questions; it opens from the sidebar, under the section, when the job is done.
+function Practice({ slug, here, section, mod, writing }: { slug: string; here: string; section: string; mod: Course["modules"][number]; writing: boolean }) {
+  const sheets = mod.extras.filter((e) => e.kind === "worksheet" && e.section === section);
+  const [asked, setAsked] = useState(false);
+  const make = () => {
+    setAsked(true);
+    post(`/api/courses/${slug}/worksheet`, { doc: `modules/${mod.id}/${section}` })
+      .then(() => toast("Writing a worksheet. It appears under this section when ready; this takes a minute or two."), () => { setAsked(false); toast("The worksheet could not be started. Try again.", null, true); });
+  };
+  useEffect(() => { if (!writing) setAsked(false); }, [writing]);
+  const busy = writing || asked;
+  return (
+    <section className="practice" aria-label="Practice">
+      <p className="kicker">Practice</p>
+      {sheets.length > 0 && <ul className="practice-sheets">{sheets.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`}>{TAG.worksheet} {e.title}</Link></li>)}</ul>}
+      <div className="actions">
+        <button onClick={make} disabled={busy}>{busy ? "Writing a worksheet…" : sheets.length ? "Make another worksheet" : "Make a worksheet"}</button>
+        <span className="muted">Ten or more exercises on this section, weighted toward what you missed.</span>
+      </div>
+    </section>
+  );
 }
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
@@ -210,20 +238,20 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             return (
               <li key={s.file}>
                 <Link to={`${here}/${s.file}`} className={`${s.file === current ? "active" : ""} ${mark(s.file)}`} title={progress?.done?.[s.file] ? "Done: every question answered" : progress?.read?.[s.file] ? "Seen: questions still to answer" : undefined}>{s.title}</Link>
-                {subs.length > 0 && <ul className="side-extras">{subs.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag">{e.kind === "drilldown" ? "↓" : "≡"}</span>{e.title}</Link></li>)}</ul>}
+                {subs.length > 0 && <ul className="side-extras">{subs.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag" title={KIND[e.kind]}>{TAG[e.kind]}</span>{e.title}</Link></li>)}</ul>}
               </li>
             );
           })}
         </ul>
         {loose.length > 0 && <>
           <div className="side-title muted">More from this module</div>
-          <ul className="side-extras side-loose">{loose.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag">{e.kind === "drilldown" ? "↓" : "≡"}</span>{e.title}</Link></li>)}</ul>
+          <ul className="side-extras side-loose">{loose.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag" title={KIND[e.kind]}>{TAG[e.kind]}</span>{e.title}</Link></li>)}</ul>
         </>}
         <div className="side-title muted">Finish</div>
         <ul className="side-steps">
           <li>{mod.test ? <Link to={`${here}/test`} className={isTest ? "active" : ""}>Module test</Link>
                         : <button className="link" disabled={testRunning} onClick={() => post(`/api/courses/${slug}/modules/${moduleId}/test`)}>{testRunning ? "Writing test…" : "Generate module test"}</button>}
-            {fromTest.length > 0 && <ul className="side-extras">{fromTest.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag">{e.kind === "drilldown" ? "↓" : "≡"}</span>{e.title}</Link></li>)}</ul>}</li>
+            {fromTest.length > 0 && <ul className="side-extras">{fromTest.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag" title={KIND[e.kind]}>{TAG[e.kind]}</span>{e.title}</Link></li>)}</ul>}</li>
           <li><Link to={`${here}/wrap`} className={`${isWrap ? "active" : ""} ${progress?.completedAt ? "is-read" : ""}`}>{progress?.completedAt ? "Understanding" : "Wrap up"}</Link></li>
           <li><Link to={`/c/${slug}/notebook`}>Course notebook</Link></li>
         </ul>
@@ -249,7 +277,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             <p className="kicker">
               {isSection ? `Module ${String(n + 1).padStart(2, "0")} · ${i + 1} of ${sections.length}`
                : isTest ? `Module ${String(n + 1).padStart(2, "0")} · test`
-               : `${extra?.kind === "drilldown" ? "Drill-down" : "Reading"}${sourceTitle ? ` · from “${sourceTitle}”` : ""}`}
+               : `${extra ? KIND[extra.kind] : ""}${sourceTitle ? ` · from “${sourceTitle}”` : ""}`}
             </p>
             <h1>{title}</h1>
             {doc.frontmatter.quote && <blockquote className="source-quote">{doc.frontmatter.quote}</blockquote>}
@@ -262,6 +290,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             <QuizGrade value={{ saved, submit }}>
               <Markdown body={doc.body} />
             </QuizGrade>
+            {(isSection || extra?.kind === "worksheet") && <Practice slug={slug} here={here} section={isSection ? current! : extra!.section ?? ""} mod={mod} writing={jobs.some((j) => j.kind === "worksheet" && j.ref === `modules/${moduleId}/${isSection ? current : extra?.section}`)} />}
             <footer className="article-foot">
               {isSection && prev ? <Link to={`${here}/${prev.file}`} className="btn">← {prev.title}</Link> : isTest && sections.at(-1) ? <Link to={`${here}/${sections.at(-1)!.file}`} className="btn">← {sections.at(-1)!.title}</Link> : <span />}
               {isSection ? (next ? <Link to={`${here}/${next.file}`} className="btn primary">{next.title} →</Link> : <Link to={afterSections.to} className="btn primary">{afterSections.label} →</Link>)

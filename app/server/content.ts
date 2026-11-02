@@ -47,8 +47,9 @@ async function mdFiles(dir: string): Promise<string[]> {
 }
 
 export type Section = { file: string; title: string };
-// Drill-downs and reading lists generated from a selection; `section` is the file they came from.
-export type Extra = { file: string; title: string; kind: "drilldown" | "reading"; section?: string };
+// Drill-downs and reading lists generated from a selection, and worksheets made at the end of a
+// section; `section` is the file they came from.
+export type Extra = { file: string; title: string; kind: "drilldown" | "reading" | "worksheet"; section?: string };
 export type Objective = { id: string; text: string; level?: string; status?: "met" | "partial" | "unmet"; evidence?: string };
 export type Module = {
   id: string; title: string; summary?: string; objectives: Objective[];
@@ -87,7 +88,7 @@ export async function getCourse(slug: string): Promise<Course | null> {
       sections.push({ file, title: d?.frontmatter.title ?? basename(file, ".md") });
     }
     const extras: Extra[] = [];
-    for (const [sub, kind] of [["drilldowns", "drilldown"], ["readings", "reading"]] as const)
+    for (const [sub, kind] of [["drilldowns", "drilldown"], ["readings", "reading"], ["worksheets", "worksheet"]] as const)
       for (const file of await mdFiles(join(dir, "modules", m.id, sub))) {
         const d = await readDoc(join(dir, "modules", m.id, sub, file));
         extras.push({ file: `${sub}/${file}`, kind, title: d?.frontmatter.title ?? basename(file, ".md"), section: d?.frontmatter.section });
