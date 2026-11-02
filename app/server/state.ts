@@ -57,6 +57,11 @@ export const state = {
     if (r) save(file("cards", course, question), { ...r, card: JSON.parse(r.card), log: JSON.parse(r.log), variants: JSON.parse(r.variants), suspended: !!r.suspended, leechBase: r.leechBase ? JSON.parse(r.leechBase) : null });
   },
   cardDeleted: (course: string, question: string) => remove(file("cards", course, question)),
+  vocab: (id: string) => {
+    const r = db.query("SELECT id, word, contexts, course_term courseTerm, entry, status, stage, train_log trainLog, trained_at trainedAt, created_at createdAt, updated_at updatedAt FROM vocab WHERE id=?").get(id) as any;
+    if (r) save(file("vocab", id), { ...r, contexts: JSON.parse(r.contexts), entry: r.entry ? JSON.parse(r.entry) : null, trainLog: JSON.parse(r.trainLog) });
+  },
+  vocabDeleted: (id: string) => remove(file("vocab", id)),
   settings: () => save(file("settings"), Object.fromEntries((db.query("SELECT key, value FROM settings").all() as any[]).map((r) => [r.key, JSON.parse(r.value)]))),
   session: (id: string) => {
     const r = db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(id);
@@ -67,7 +72,7 @@ export const state = {
 // --- rebuild: files → SQLite ----------------------------------------------
 export function rebuild() {
   const run = db.transaction(() => {
-    for (const t of ["answers", "annotations", "attempts", "progress", "cards", "review_sessions", "settings"]) db.run(`DELETE FROM ${t}`);
+    for (const t of ["answers", "annotations", "attempts", "progress", "cards", "review_sessions", "settings", "vocab"]) db.run(`DELETE FROM ${t}`);
     const settings = load(file("settings"));
     if (settings) for (const [k, v] of Object.entries(settings)) db.run("INSERT OR REPLACE INTO settings (key, value) VALUES (?,?)", [k, JSON.stringify(v)]);
     for (const p of walk(join(STATE_DIR, "answers"))) {
@@ -91,6 +96,11 @@ export function rebuild() {
       const r = load(p); if (!r) continue;
       db.run("INSERT OR REPLACE INTO cards (course, question, doc, module, due, card, streak, log, state, suspended, flag, variants, last_variant, leech_base, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         [r.course, r.question, r.doc, r.module ?? null, r.due, JSON.stringify(r.card), r.streak ?? 0, JSON.stringify(r.log ?? []), r.state ?? "new", r.suspended ? 1 : 0, r.flag ?? null, JSON.stringify(r.variants ?? []), r.lastVariant ?? -1, r.leechBase ? JSON.stringify(r.leechBase) : null, r.updatedAt]);
+    }
+    for (const p of walk(join(STATE_DIR, "vocab"))) {
+      const r = load(p); if (!r) continue;
+      db.run("INSERT OR REPLACE INTO vocab (id, word, contexts, course_term, entry, status, stage, train_log, trained_at, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+        [r.id, r.word, JSON.stringify(r.contexts ?? []), r.courseTerm ?? null, r.entry ? JSON.stringify(r.entry) : null, r.status ?? "pending", r.stage ?? 0, JSON.stringify(r.trainLog ?? []), r.trainedAt ?? null, r.createdAt, r.updatedAt ?? r.createdAt]);
     }
     for (const p of walk(join(STATE_DIR, "sessions"))) {
       const r = load(p); if (!r) continue;

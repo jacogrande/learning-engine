@@ -53,6 +53,13 @@ db.run(`
   );
   -- one row per review session (daily, course, module, …); drives the streak and the summary
   CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  -- vocabulary: words collected while reading; entry is the generated explanation and examples,
+  -- contexts every sentence the word was captured from, train_log the Train view's attempts
+  CREATE TABLE IF NOT EXISTS vocab (
+    id TEXT PRIMARY KEY, word TEXT NOT NULL, contexts TEXT NOT NULL DEFAULT '[]', course_term TEXT,
+    entry TEXT, status TEXT NOT NULL DEFAULT 'pending', stage INTEGER NOT NULL DEFAULT 0,
+    train_log TEXT NOT NULL DEFAULT '[]', trained_at TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS review_sessions (
     id TEXT PRIMARY KEY, kind TEXT NOT NULL, scope TEXT, started_at TEXT NOT NULL, ended_at TEXT,
     reviewed INTEGER NOT NULL DEFAULT 0, correct INTEGER NOT NULL DEFAULT 0, sure_wrong INTEGER NOT NULL DEFAULT 0

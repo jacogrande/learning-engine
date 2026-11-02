@@ -18,7 +18,7 @@ export type Annotation = { id: string; doc: string; quote: string; prefix: strin
 export type Chat = { id: string; doc: string; kind?: "section" | "summary"; module?: string | null; context: string | null; title: string; createdAt: string; updatedAt?: string; messages?: number };
 export type Message = { id: string; role: "user" | "assistant"; content: string };
 export type SyncStatus = { repo: boolean; remote: string | null; branch: string | null; busy: string | null; dirty: boolean; lastPull: string | null; lastPush: string | null; error: string | null };
-export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
+export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
 
 export const get = <T,>(url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 const send = (method: string) => <T,>(url: string, body?: unknown) =>

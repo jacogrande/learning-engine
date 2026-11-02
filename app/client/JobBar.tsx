@@ -6,7 +6,7 @@ import { Link } from "./App";
 const label = (j: Job) => ({
   start: `Starting course: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
   test: `Writing module test ${j.ref?.split("/")[0]}`, wrap: `Wrapping up ${j.ref?.split("/")[0]}`,
-  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant",
+  drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant", vocab: "Writing a vocab entry",
 }[j.kind]);
 
 export function JobBar() {
@@ -14,7 +14,7 @@ export function JobBar() {
   const [open, setOpen] = useState(false);
   const [log, setLog] = useState<string[]>([]);
   // Chat and grading show their progress in place; the bar is for the long jobs.
-  const shown = jobs.filter((j) => !["chat", "grade", "variant"].includes(j.kind));
+  const shown = jobs.filter((j) => !["chat", "grade", "variant", "vocab"].includes(j.kind));
   const job = shown.find((j) => j.status === "running") ?? shown[0];
   const [, tick] = useState(0);
 
@@ -52,12 +52,21 @@ const NOUN: Partial<Record<Job["kind"], string>> = { start: "Starting the course
 let seq = 0;
 function Toasts() {
   const [list, setList] = useState<Toast[]>([]);
-  const push = (t: Omit<Toast, "id">) => setList((l) => [...l.slice(-3), { ...t, id: ++seq }]);
+  const push = (t: Omit<Toast, "id"> & { fade?: boolean }) => {
+    const id = ++seq;
+    setList((l) => [...l.slice(-3), { ...t, id }]);
+    if (t.fade) setTimeout(() => setList((l) => l.filter((x) => x.id !== id)), 6000);
+  };
   useEvent("notice", useCallback((ev: any) => {
-    const what = ev.kind === "drilldown" ? "Drill-down" : "Reading list";
+    const what = ev.kind === "drilldown" ? "Drill-down" : ev.kind === "vocab" ? "Vocab entry" : "Reading list";
     if (ev.ok) push({ text: `${what} ready: ${ev.title}`, to: ev.to });
     else push({ text: `${what} finished, but no new page turned up. Check the module's sidebar.`, bad: true });
   }, []));
+  // Messages from this page (a word added), not the server.
+  useEffect(() => {
+    const on = (e: Event) => push({ ...(e as CustomEvent).detail, fade: true });
+    addEventListener("toast", on); return () => removeEventListener("toast", on);
+  }, []);
   useEvent("job", useCallback((ev: { job: Job }) => {
     const j = ev.job, noun = NOUN[j.kind];
     if (noun && j.status === "failed") push({ text: `${noun} failed${j.error ? `: ${j.error.slice(0, 140)}` : "."}`, bad: true });

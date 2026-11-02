@@ -5,8 +5,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, put, useLive, type Answer, type Course } from "./api";
 import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell, navigate } from "./App";
+import { DIFFICULTY } from "./Vocab";
 
-type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: QuizSpec; spec: QuizSpec };
+const VOCAB = "_vocab";
+
+type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: QuizSpec; spec: QuizSpec; vocab?: { format: string; sentence: string; form: string } };
 type Summary = { dueCount: number; total: number; learned: number; suspended: number; seeded: number; streak: number; next: string | null };
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
@@ -66,7 +69,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
 
   const record = (it: Item, a: Saved) => {
     const t = tally.current;
-    if (a.result && t.pending.has(key(it))) { t.pending.delete(key(it)); if (a.result === "correct") t.correct++; if (a.result === "wrong" && a.confidence === 3) t.sureWrong++; }
+    if (a.result && t.pending.has(key(it))) { t.pending.delete(key(it)); if (a.result === "correct") t.correct++; if (a.result === "wrong" && a.confidence === 3 && it.course !== VOCAB) t.sureWrong++; }
     setSaved((s) => ({ ...s, [key(it)]: a }));
     syncSession();
   };
@@ -77,7 +80,11 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
     const pending: Saved = { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null };
     setSaved((s) => ({ ...s, [key(it)]: pending }));
-    post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant }).then((r) => {
+    // A vocab card goes to the vocab grader with the learner's difficulty rating; then the card is polled like any short answer.
+    const sent = it.course === VOCAB
+      ? post(`/api/vocab/${it.question}/answer`, { format: it.vocab!.format, sentence: it.vocab!.sentence, form: it.vocab!.form, answer, difficulty: confidence, mode: "review" }).then(() => ({ review: null }))
+      : post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant });
+    sent.then((r) => {
       if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
       // card stays "grading" in the tally rather than being counted as answered with no result.
@@ -154,17 +161,20 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   const answered = saved[key(item)];
   const graded = answered && (answered.result || answered.note);
   const due = answered?.due;
-  const sectionLink = `/c/${item.course}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`;
-  const tag = q.topped && i >= q.items.length - q.topped ? " · recent, not yet due" : item.reviews === 0 ? " · dummy" : "";
+  const isVocab = item.course === VOCAB;
+  const sectionLink = isVocab ? `/vocab#w-${item.question}` : `/c/${item.course}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`;
+  // A recall card must not name its word before the answer.
+  const sectionLabel = isVocab && item.vocab?.format === "recall" && !graded ? "a word" : item.sectionTitle;
+  const tag = q.topped && i >= q.items.length - q.topped ? " · recent, not yet due" : item.reviews === 0 ? (item.course === VOCAB ? " · new word" : " · dummy") : "";
   return (
     <Shell crumbs={crumbs} className="page">
       <h1>{title}</h1>{head}
       <p className="meta review-kicker">
         <span>{i + 1} of {q.items.length}{tag}{item.variant !== null && <> · <span className="level">variant</span> <button className="link" onClick={() => setShowOriginal((v) => !v)}>{showOriginal ? "hide original" : "show original"}</button></>}</span>
-        <span>{!slug && `${item.courseTitle} · `}<Link to={sectionLink}>{item.sectionTitle}</Link>{item.streak > 0 ? ` · ${item.streak} in a row` : ""}{item.sureWrong ? " · sure and wrong last time" : ""}</span>
+        <span>{(!slug || isVocab) && `${item.courseTitle} · `}{sectionLabel === "a word" ? sectionLabel : <Link to={sectionLink}>{sectionLabel}</Link>}{item.streak > 0 ? ` · ${item.streak} in a row` : ""}{item.sureWrong ? " · sure and wrong last time" : ""}</span>
       </p>
       {showOriginal && <blockquote className="source-quote">{item.original.prompt}</blockquote>}
-      <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit }}>
+      <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit, scale: isVocab ? DIFFICULTY : undefined }}>
         <Quiz key={`${key(item)}:${item.variant ?? "o"}`} spec={item.spec} />
       </QuizGrade>
       <div className="actions">
@@ -175,8 +185,8 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
         {graded && <button className="link" onClick={flag}>Flag grade</button>}
         <button className="link" title="Stop asking this question" onClick={suspend}>Suspend</button>
       </div>
-      {answered?.leech && <p className="quiz-explain hyper">This card has lapsed six times, so it is suspended and leaves the queue. Reread <Link to={sectionLink}>{item.sectionTitle}</Link>, then bring it back from <Link to="/review/cards">Cards</Link>.</p>}
-      <p className="meta keys">1 · 2 · 3 confidence &nbsp; Enter check / next</p>
+      {answered?.leech && <p className="quiz-explain hyper">This card has lapsed six times, so it is suspended and leaves the queue. {isVocab ? "Look at" : "Reread"} <Link to={sectionLink}>{item.sectionTitle}</Link>, then bring it back from <Link to="/review/cards">Cards</Link>.</p>}
+      <p className="meta keys">1 · 2 · 3 {isVocab ? "how hard it was" : "confidence"} &nbsp; Enter check / next</p>
     </Shell>
   );
 }

@@ -66,3 +66,25 @@ export function scrollToRange(r: Range) {
   const top = r.getBoundingClientRect().top + scrollY - 120;
   scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }
+
+// The sentence around the current selection, from its paragraph (or list item, quote, cell), for a
+// vocabulary capture. Falls back to the paragraph's text when sentences cannot be told apart.
+export function sentenceAround(): { word: string; sentence: string } | null {
+  const sel = getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
+  const range = sel.getRangeAt(0);
+  const word = range.toString().trim();
+  if (!word) return null;
+  const el = range.startContainer.nodeType === 1 ? (range.startContainer as Element) : range.startContainer.parentElement;
+  const block = el?.closest("p, li, blockquote, td, th, h1, h2, h3, h4, .msg, .quiz-prompt, label") ?? el;
+  if (!block) return { word, sentence: "" };
+  const pre = document.createRange();
+  pre.selectNodeContents(block);
+  pre.setEnd(range.startContainer, range.startOffset);
+  const start = pre.toString().length, text = block.textContent ?? "";
+  // Sentence ends: . ! ? followed by space and a capital or quote. Find the one before and after.
+  const ends = [...text.matchAll(/[.!?]["”’)]?\s+(?=["“‘(]?[A-Z0-9])/g)].map((m) => m.index! + m[0].length);
+  const from = Math.max(0, ...ends.filter((i) => i <= start));
+  const to = ends.find((i) => i > start + word.length) ?? text.length;
+  return { word, sentence: text.slice(from, to).trim().replace(/\s+/g, " ") };
+}

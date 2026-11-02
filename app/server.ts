@@ -9,6 +9,7 @@ import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
 import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
+import * as vocab from "./server/vocab";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const q = (req: Request, key: string) => new URL(req.url).searchParams.get(key) ?? "";
@@ -166,7 +167,8 @@ async function notebook(slug: string) {
   // `body` is every message's text, so the notebook can search inside conversations.
   const chats = db.query(`SELECT c.id, c.doc, c.kind, c.module, c.context, c.title, c.created_at createdAt, c.updated_at updatedAt, count(m.id) messages, group_concat(m.content, ' ') body
                           FROM chats c LEFT JOIN messages m ON m.chat=c.id WHERE c.course=? GROUP BY c.id ORDER BY c.updated_at DESC`).all(slug);
-  return { notes, progress, highlights, chats };
+  const words = vocab.listWords().filter((w) => w.contexts.some((c: { course: string | null }) => c.course === slug));
+  return { notes, progress, highlights, chats, words };
 }
 
 // A drill-down or reading started from the module test or from another extra still has to hang off
@@ -511,6 +513,35 @@ Bun.serve({
     "/api/review/cards": async (req) => json(Object.fromEntries(await Promise.all((["suspended", "flagged", "orphaned"] as const).map(async (k) => [k, await cardList(k)])))),
     // Only orphans can be removed: a card whose question still exists would just come back.
     "/api/review/cards/:course/:question/delete": { POST: (req) => { const c = db.query("SELECT state FROM cards WHERE course=? AND question=?").get(req.params.course, req.params.question) as any; if (c?.state !== "orphaned") return json({ error: "only orphaned cards can be removed" }, 400); deleteCard(req.params.course, req.params.question); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
+
+    // --- vocabulary ---------------------------------------------------------
+    "/api/vocab": {
+      GET: () => json({ words: vocab.listWords(), counts: vocab.counts() }),
+      POST: async (req) => {
+        try { return json(vocab.addWord((await req.json()) as vocab.Capture)); }
+        catch (e) { return json({ error: (e as Error).message }, 400); }
+      },
+    },
+    "/api/vocab/train": () => json(vocab.session()),
+    "/api/vocab/:id": {
+      GET: (req) => { const w = vocab.getWord(req.params.id); return w ? json(w) : json({ error: "not found" }, 404); },
+      PUT: async (req) => { const w = vocab.updateWord(req.params.id, await req.json()); return w ? json(w) : json({ error: "not found" }, 404); },
+      DELETE: (req) => { vocab.deleteWord(req.params.id); return json({ ok: true }); },
+    },
+    "/api/vocab/:id/regenerate": { POST: async (req) => { await vocab.enrich(req.params.id); return json({ ok: true }); } },
+    "/api/vocab/:id/meet": { POST: (req) => json(vocab.meet(req.params.id)) },
+    "/api/vocab/:id/finish": { POST: async (req) => json(vocab.finishWord(req.params.id, (await req.json()) as { correct: number; wrong: number })) },
+    "/api/vocab/:id/task": (req) => { const t = vocab.task(req.params.id, q(req, "stage") ? Number(q(req, "stage")) : undefined); return t ? json(t) : json({ error: "not ready" }, 404); },
+    // A graded attempt. Exact recalls and picks answer at once; the rest come back as a `vgrade` event.
+    "/api/vocab/:id/answer": {
+      POST: async (req) => {
+        const wid = req.params.id, a = (await req.json()) as vocab.Attempt;
+        try {
+          const r = vocab.answer(wid, a, (g) => broadcast({ type: "vgrade", id: wid, mode: a.mode, ...g }));
+          return json(r);
+        } catch (e) { return json({ error: (e as Error).message }, 400); }
+      },
+    },
 
     "/api/sync": {
       GET: () => json(sync.status),

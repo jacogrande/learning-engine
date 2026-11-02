@@ -5,10 +5,11 @@ import { useLive, type Chat, type Course, type Module } from "./api";
 import { Markdown } from "./Markdown";
 import { Thread, ChatActions } from "./Chat";
 import { Link, NotFound, Shell } from "./App";
+import { Ladder, type Word } from "./Vocab";
 
 type Highlight = { id: string; doc: string; quote: string; createdAt: string };
 type NChat = Chat & { body?: string };
-type Book = { notes: Record<string, string>; progress: Record<string, { summary?: string; chat?: string; completedAt?: string }>; highlights: Highlight[]; chats: NChat[] };
+type Book = { notes: Record<string, string>; progress: Record<string, { summary?: string; chat?: string; completedAt?: string }>; highlights: Highlight[]; chats: NChat[]; words?: Word[] };
 
 const moduleOf = (doc: string) => /^modules\/([^/]+)/.exec(doc)?.[1] ?? "";
 const fileOf = (doc: string) => doc.split("/").slice(2).join("/");
@@ -26,12 +27,13 @@ export function NotebookPage({ slug }: { slug: string }) {
   const known = new Set(course.modules.map((m) => m.id));
   const strays = Object.keys(book.notes).filter((id) => !known.has(id) && book.notes[id].trim() && hit(book.notes[id]));
   const sections = course.modules.map((m) => <ModuleEntry key={m.id} slug={slug} mod={m} book={book} hit={hit} reload={reload} />);
-  const empty = !book.highlights.length && !book.chats.length && !Object.values(book.notes).some((n) => n.trim()) && !Object.values(book.progress).some((p) => p.summary);
+  const empty = !book.words?.length && !book.highlights.length && !book.chats.length && !Object.values(book.notes).some((n) => n.trim()) && !Object.values(book.progress).some((p) => p.summary);
 
   return (
     <Shell crumbs={crumbs} className="page notebook">
       <div className="page-head"><h1>Notebook</h1><input className="field notebook-search" type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search notes, highlights, chats" /></div>
       {empty ? <p className="muted empty">Nothing yet. Notes, highlights and chats you make in a lesson collect here.</p> : <>
+        <Words words={(book.words ?? []).filter((w) => hit(w.word, w.entry?.headword, w.entry?.explanation))} />
         {sections}
         {strays.length > 0 && (
           <section className="nb-module">
@@ -41,6 +43,17 @@ export function NotebookPage({ slug }: { slug: string }) {
         )}
       </>}
     </Shell>
+  );
+}
+
+// Words captured while reading this course.
+function Words({ words }: { words: Word[] }) {
+  if (!words.length) return null;
+  return (
+    <section className="nb-module">
+      <div className="module-head"><h2>Words from this course</h2><Link to="/vocab/train" className="btn">Train</Link></div>
+      <ul className="nb-words">{words.map((w) => <li key={w.id}><Link to={`/vocab#w-${w.id}`}>{w.entry?.headword ?? w.word}</Link><Ladder stage={w.stage} /><span className="muted">{w.entry?.explanation ?? "entry being written"}</span></li>)}</ul>
+    </section>
   );
 }
 

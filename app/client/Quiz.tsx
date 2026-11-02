@@ -17,7 +17,8 @@ const Inline = ({ children }: { children: string }) => (
 export const QuizForm = createContext<{ answers: Record<string, string>; set: (id: string, v: string) => void } | null>(null);
 export type QuestionResult = { result: Result; note: string };
 export const QuizReview = createContext<{ answers: Record<string, string>; results: Record<string, QuestionResult> } | null>(null);
-export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void } | null>(null);
+// `scale` replaces the confidence labels (vocab cards ask how hard the recall was instead).
+export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[] } | null>(null);
 
 const CONFIDENCE = ["Guessing", "Fairly sure", "Sure"];
 
@@ -67,13 +68,15 @@ function Live({ spec }: { spec: QuizSpec }) {
   const grading = checked && spec.type === "short" && grade && saved?.answer === v && !saved?.note;
   const status: Result | null = checked ? (spec.type === "mcq" ? (correct ? "correct" : "wrong") : saved?.answer === v ? saved?.result ?? null : null) : null;
   const needConfidence = !!grade && !confidence;
-  const sureAndWrong = status === "wrong" && (saved?.confidence ?? confidence) === 3;
+  const sureAndWrong = !grade?.scale && status === "wrong" && (saved?.confidence ?? confidence) === 3;
 
   const check = () => { setChecked(true); grade?.submit(spec, v, confidence); };
 
   return (
     <div className={`quiz ${status ? `is-${status}` : ""}`}>
-      <p className="quiz-prompt"><Inline>{spec.prompt}</Inline>{status && <span className="quiz-status">{status}</span>}</p>
+      {spec.prompt.includes("\n")
+        ? <div className="quiz-prompt quiz-prompt-block">{status && <span className="quiz-status">{status}</span>}<ReactMarkdown>{spec.prompt}</ReactMarkdown></div>
+        : <p className="quiz-prompt"><Inline>{spec.prompt}</Inline>{status && <span className="quiz-status">{status}</span>}</p>}
       {spec.type === "mcq" ? (
         <div className="quiz-options">
           {spec.options?.map((o, i) => (
@@ -88,11 +91,11 @@ function Live({ spec }: { spec: QuizSpec }) {
       {!form && (
         <div className="quiz-actions">
           {grade && !checked && (
-            <span className="confidence" role="group" aria-label="How sure are you?">
-              {CONFIDENCE.map((c, i) => <button key={c} type="button" aria-pressed={confidence === i + 1} onClick={() => setConfidence(i + 1)}>{c}</button>)}
+            <span className="confidence" role="group" aria-label={grade.scale ? "How hard was it to recall?" : "How sure are you?"}>
+              {(grade.scale ?? CONFIDENCE).map((c, i) => <button key={c} type="button" aria-pressed={confidence === i + 1} onClick={() => setConfidence(i + 1)}>{c}</button>)}
             </span>
           )}
-          <button className="primary" onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? "Pick how sure you are first" : undefined}>{grading ? "Grading…" : "Check"}</button>
+          <button className="primary" onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? (grade?.scale ? "Rate how hard the recall was first" : "Pick how sure you are first") : undefined}>{grading ? "Grading…" : "Check"}</button>
           {spec.type === "short" && grade && !checked && saved && <span className="muted">Edited since last check</span>}
         </div>
       )}

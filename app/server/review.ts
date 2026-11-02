@@ -9,6 +9,7 @@ import { db, id, now } from "./db";
 import { COURSES_DIR, getDoc, listCourses } from "./content";
 import { state } from "./state";
 import { touch } from "./sync";
+import { VOCAB, reviewSpec, wordRow } from "./vocab-spec";
 
 const LEECH_LAPSES = 6;
 const MAX_VARIANTS = 3;
@@ -61,15 +62,16 @@ const isLeech = (card: Card, logs: any[], base: LeechBase = null) => {
 const baseOf = (row: any): LeechBase => (row?.leech_base ? JSON.parse(row.leech_base) : null);
 
 // Review answers live in the card's log (answer and grader note), not in the lesson's `answers` row.
-export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string } = {}) {
+// `extra.rating` overrides the result+confidence mapping (vocab: the learner rates how hard the recall was).
+export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string; rating?: Grade; format?: string } = {}) {
   if (doc.startsWith("quizzes/")) return null;   // baseline: no card
-  const row = db.query("SELECT card, streak, log, suspended, last_variant, leech_base FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  const row = db.query("SELECT card, streak, log, suspended, last_variant, leech_base, module FROM cards WHERE course=? AND question=?").get(course, question) as any;
   const prev: Card = row ? revive(JSON.parse(row.card)) : createEmptyCard(new Date());
-  const r = rating(result, confidence);
+  const r = extra.rating ?? rating(result, confidence);
   const { card, log } = scheduler().next(prev, new Date(), r);
   const streak = r === Rating.Again ? 0 : (row?.streak ?? 0) + 1;
-  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant, ...(extra.answer !== undefined ? { answer: extra.answer } : {}), ...(extra.note ? { note: extra.note } : {}) }];
-  const module = /^modules\/([^/]+)\//.exec(doc)?.[1] ?? null;
+  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant, ...(extra.answer !== undefined ? { answer: extra.answer } : {}), ...(extra.note ? { note: extra.note } : {}), ...(extra.format ? { format: extra.format } : {}) }];
+  const module = course === VOCAB ? row?.module ?? null : /^modules\/([^/]+)\//.exec(doc)?.[1] ?? null;
   let suspended = !!row?.suspended;
   let leech = false;
   if (!suspended && r === Rating.Again && isLeech(card, logs, baseOf(row))) { suspended = true; leech = true; }
@@ -93,7 +95,7 @@ export function cardStatus(course: string, question: string) {
 }
 
 // --- learner profile writes ---------------------------------------------------
-function readProfile(course: string): { path: string; fm: any; body: string } | null {
+export function readProfile(course: string): { path: string; fm: any; body: string } | null {
   const path = join(COURSES_DIR, course, "learner.md");
   let src = ""; try { src = readFileSync(path, "utf8"); } catch { return null; }
   const m = /^---\n([\s\S]*?)\n---\n?([\s\S]*)$/.exec(src);
@@ -103,7 +105,7 @@ function readProfile(course: string): { path: string; fm: any; body: string } | 
 }
 // Set (or remove, with undefined) top-level frontmatter keys by editing their lines in place, so
 // hand-written YAML elsewhere in the file keeps its style. Writes only when a value changed.
-function patchProfile(course: string, patch: Record<string, unknown>): boolean {
+export function patchProfile(course: string, patch: Record<string, unknown>): boolean {
   const p = readProfile(course); if (!p) return false;
   let fmText = readFileSync(p.path, "utf8").match(/^---\n([\s\S]*?)\n---/)![1] + "\n";
   let changed = false;
@@ -182,9 +184,16 @@ export async function cardList(kind: "suspended" | "flagged" | "orphaned", cours
   const courses = Object.fromEntries((await listCourses()).map((c) => [c.slug, c]));
   const out = [];
   for (const r of rows) {
+    const log = JSON.parse(r.log), card = revive(JSON.parse(r.card));
+    if (r.course === VOCAB) {
+      const w = wordRow(r.question);
+      out.push({ course: r.course, courseTitle: "Vocabulary", question: r.question, doc: r.doc, module: null, moduleTitle: "", sectionTitle: w?.word ?? r.question,
+                 prompt: w ? `${w.entry?.headword ?? w.word}: ${w.entry?.explanation ?? ""}` : null, flag: r.flag ?? null, reviews: log.length, lapses: card.lapses,
+                 leech: !!r.suspended && isLeech(card, log, baseOf(r)), updatedAt: r.updated_at, vocab: true });
+      continue;
+    }
     const spec = await question(r.course, r.doc, r.question);
     const c = courses[r.course], m = c?.modules.find((x) => x.id === r.module), file = r.doc.split("/").slice(2).join("/");
-    const log = JSON.parse(r.log), card = revive(JSON.parse(r.card));
     out.push({
       course: r.course, courseTitle: c?.title ?? r.course, question: r.question, doc: r.doc, module: r.module,
       moduleTitle: m?.title ?? r.module ?? "", sectionTitle: file === "quiz.md" ? "Module test" : (m?.sections.find((s) => s.file === file)?.title ?? m?.extras.find((e) => e.file === file)?.title ?? file),
@@ -249,12 +258,23 @@ export async function question(course: string, doc: string, qid: string) {
 }
 
 type Row = { course: string; question: string; doc: string; module: string | null; due: string; streak: number; state: CardState; log: string; card: string; variants: string; last_variant: number };
-export type QueueItem = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: CardState; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: any; spec: any };
+export type QueueItem = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: CardState; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: any; spec: any; vocab?: { format: string; sentence: string; form: string } };
 
 async function resolve(rows: Row[], prefer = false): Promise<QueueItem[]> {
   const courses = Object.fromEntries((await listCourses()).map((c) => [c.slug, c]));
   const items: QueueItem[] = [];
   for (const r of rows) {
+    if (r.course === VOCAB) {
+      const log = JSON.parse(r.log), v = reviewSpec(r.question, log.length), last = log.at(-1);
+      if (!v) { db.run("UPDATE cards SET state='orphaned' WHERE course=? AND question=?", [r.course, r.question]); continue; }
+      if (r.state === "orphaned") db.run("UPDATE cards SET state=? WHERE course=? AND question=?", [stateOf(revive(JSON.parse(r.card)), r.streak, log.length, false), r.course, r.question]);
+      items.push({
+        course: VOCAB, courseTitle: "Vocabulary", question: r.question, doc: r.doc, module: r.module, moduleTitle: "Vocabulary", sectionTitle: v.word,
+        due: r.due, streak: r.streak, state: r.state, reviews: log.length, sureWrong: false, variant: null, variantCount: 0,
+        original: v.spec, spec: v.spec, vocab: { format: v.format, sentence: v.sentence, form: v.form },
+      });
+      continue;
+    }
     const spec = await question(r.course, r.doc, r.question);
     if (!spec) { db.run("UPDATE cards SET state='orphaned' WHERE course=? AND question=?", [r.course, r.question]); continue; }
     if (r.state === "orphaned") db.run("UPDATE cards SET state=? WHERE course=? AND question=?", [stateOf(revive(JSON.parse(r.card)), r.streak, JSON.parse(r.log).length, false), r.course, r.question]);
@@ -297,7 +317,7 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   const base = "suspended=0 AND state<>'orphaned'";
   let rows: Row[]; const args: string[] = [];
   let scopeWhere = "";
-  if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = " AND course=?"; args.push(opts.scope!); }
+  if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = ` AND (course=? OR (course='${VOCAB}' AND module=?))`; args.push(opts.scope!, opts.scope!); }
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
   if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
   if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=? ORDER BY due`).all(...args, now()) as Row[];
@@ -318,7 +338,7 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   const next = (db.query(`SELECT min(due) d FROM cards WHERE ${base}${scopeWhere} AND due>?`).get(...args, now()) as any).d;
   // Ask for variants in the background for cards that will be seen again, a few per load.
   let asked = 0;
-  for (const it of items) if (asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
+  for (const it of items) if (it.course !== VOCAB && asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
   return { mode, scope: opts.scope ?? null, items, dueCount: totalDue, remaining: Math.max(0, totalDue - excl.size - items.length + topped), topped, next };
 }
 let onVariantWanted: ((it: QueueItem) => void) | null = null;
@@ -417,11 +437,11 @@ export async function seed(course?: string) {
   return added;
 }
 export function clearSeeded(course?: string) {
-  const rows = db.query(`SELECT course, question FROM cards WHERE log='[]'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
+  const rows = db.query(`SELECT course, question FROM cards WHERE log='[]' AND course<>'${VOCAB}'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
   for (const r of rows) { db.run("DELETE FROM cards WHERE course=? AND question=?", [r.course, r.question]); state.cardDeleted(r.course, r.question); }
   return rows.length;
 }
-export const seededCount = (course?: string) => (db.query(`SELECT count(*) n FROM cards WHERE log='[]'${course ? " AND course=?" : ""}`).get(...(course ? [course] : [])) as any).n;
+export const seededCount = (course?: string) => (db.query(`SELECT count(*) n FROM cards WHERE log='[]' AND course<>'${VOCAB}'${course ? " AND course=?" : ""}`).get(...(course ? [course] : [])) as any).n;
 
 export const suspendedCards = async (course?: string) =>
   resolve(db.query(`SELECT * FROM cards WHERE suspended=1${course ? " AND course=?" : ""} ORDER BY updated_at DESC`).all(...(course ? [course] : [])) as Row[]);

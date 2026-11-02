@@ -8,6 +8,8 @@ import { ReviewPage } from "./Review";
 import { StatsPage } from "./Stats";
 import { CardsPage } from "./Cards";
 import { NotebookPage } from "./Notebook";
+import { VocabCapture, VocabPage } from "./Vocab";
+import { TrainPage } from "./Train";
 
 // A server started before the client was updated still sends objectives as strings.
 export const objectiveText = (o: { text?: string } | string) => (typeof o === "string" ? o : o.text ?? "");
@@ -32,13 +34,15 @@ export function App() {
     path === "/" ? <Courses />
     : path === "/review/stats" ? <StatsPage />
     : path === "/review/cards" ? <CardsPage />
+    : path === "/vocab" ? <VocabPage />
+    : path === "/vocab/train" ? <TrainPage />
     : path === "/review" ? <ReviewPage key={location.search} mode={mode} scope={scope} />
     : !m ? <NotFound />
     : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} />
     : m[2] === "review" ? <ReviewPage key={location.search} slug={m[1]} mode={mode} scope={scope} />
     : m[2] === "notebook" ? <NotebookPage slug={m[1]} />
     : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />;
-  return <>{page}<JobBar /></>;
+  return <>{page}<VocabCapture /><JobBar /></>;
 }
 
 export function NotFound({ crumbs = [], what = "page" }: { crumbs?: Crumb[]; what?: string }) {
@@ -63,7 +67,7 @@ export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; childr
             <span key={i}><span className="sep">/</span>{c.to ? <Link to={c.to}>{c.label}</Link> : <span className="current">{c.label}</span>}</span>
           ))}
         </nav>
-        <div className="top-right"><ReviewLink /><Sync /><Theme /></div>
+        <div className="top-right"><Link to="/vocab" className="top-review" >Vocab</Link><ReviewLink /><Sync /><Theme /></div>
       </header>
       <div className={className}>{children}</div>
     </>

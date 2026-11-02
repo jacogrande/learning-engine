@@ -519,3 +519,65 @@ article img, .mermaid svg { max-width: 100%; }
 .toast { display: flex; align-items: center; gap: var(--s-3); padding: var(--s-3) var(--s-4); background: var(--bg); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); box-shadow: var(--shadow); font-size: var(--fs-small); }
 .toast > span:first-child { flex: 1; }
 .toast.is-bad { border-color: var(--bad); }
+
+/* ==========================================================================
+   Vocabulary: capture, list, train
+   ========================================================================== */
+.modal-scrim { position: fixed; inset: 0; z-index: var(--z-popover); background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding: 12vh var(--s-4) var(--s-4); }
+.modal { width: min(480px, 100%); background: var(--bg); border-radius: var(--radius-3); box-shadow: var(--shadow); padding: var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); }
+.modal h2 { margin: 0; font-size: var(--fs-h2); }
+.modal label { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-ui); }
+.modal label.check { flex-direction: row; align-items: center; gap: var(--s-2); }
+.modal .field { width: 100%; }
+.modal .actions { margin: 0; }
+
+.vocab-page .page-head .actions { margin: 0; }
+.vocab-tools { display: flex; flex-wrap: wrap; gap: var(--s-3); align-items: center; margin: var(--s-4) 0; }
+.vocab-tools .field { flex: 1; min-width: 200px; }
+.vocab-list { list-style: none; padding: 0; margin: 0; border-top: var(--hairline) solid var(--faint); }
+.vocab-row { border-bottom: var(--hairline) solid var(--faint); }
+.vocab-head { display: grid; grid-template-columns: minmax(7rem, auto) auto 1fr auto 7rem; gap: var(--s-3); align-items: baseline; width: 100%; min-height: 0; padding: var(--s-3) 0; border: 0; border-radius: 0; background: none; text-align: left; font-weight: 400; }
+.vocab-head:hover { background: var(--hover); }
+.vocab-word { font-weight: 600; }
+.vocab-def { color: var(--muted); font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vocab-row.is-open .vocab-def { visibility: hidden; }
+.vocab-status { font-size: var(--fs-small); text-align: right; }
+.vocab-body { padding: 0 0 var(--s-4); }
+.ladder { display: inline-flex; gap: 3px; align-items: center; }
+.ladder i { width: 10px; height: 4px; border-radius: 2px; background: var(--faint); }
+.ladder i.on { background: var(--accent); }
+.word-entry h4 { margin: var(--s-4) 0 var(--s-1); font-size: var(--fs-caption); line-height: var(--lh-caption); font-weight: 500; text-transform: uppercase; letter-spacing: var(--ls-caption); color: var(--muted); }
+.word-entry ul { margin: 0; padding-left: var(--s-5); }
+.word-entry li p { margin: var(--s-1) 0; }
+.word-entry .contexts { list-style: none; padding: 0; }
+.word-entry .contexts blockquote { margin: var(--s-1) 0; }
+.vocab-edit { margin-top: var(--s-3); }
+.nb-words { list-style: none; padding: 0; margin: var(--s-3) 0 0; }
+.nb-words li { display: grid; grid-template-columns: minmax(7rem, auto) auto 1fr; gap: var(--s-3); align-items: baseline; padding: var(--s-1) 0; font-size: var(--fs-ui); }
+
+.train { max-width: 44rem; }
+.train-progress { height: 3px; background: var(--faint); border-radius: 2px; overflow: hidden; margin-bottom: var(--s-2); }
+.train-progress span { display: block; height: 100%; background: var(--accent); transition: width var(--slow); }
+.train-card { padding: var(--s-5) 0; }
+.train-card h1 { margin: var(--s-1) 0 var(--s-1); font-size: var(--fs-display); }
+.train-prompt { font-size: var(--fs-body); }
+.train-prompt blockquote { font-size: 18px; }
+.train-input { width: 100%; font-size: 18px; margin: var(--s-3) 0; }
+input.train-input { max-width: 22rem; }
+.train-feedback { margin-top: var(--s-4); }
+.train-feedback > p:first-child { margin: 0 0 var(--s-3); }
+.train-answer { padding: var(--s-3) var(--s-4); background: var(--code); border-radius: var(--radius-2); }
+.train-answer > :first-child { margin-top: 0; } .train-answer > :last-child { margin-bottom: 0; }
+.train-card.is-correct .quiz-status { color: var(--ok); }
+.train-card.is-wrong .quiz-status, .train-card.is-skipped .quiz-status { color: var(--bad); }
+.train-summary { list-style: none; padding: 0; border-top: var(--hairline) solid var(--faint); }
+.train-summary li { display: grid; grid-template-columns: minmax(8rem, auto) auto 1fr; gap: var(--s-3); align-items: baseline; padding: var(--s-2) 0; border-bottom: var(--hairline) solid var(--faint); }
+@media (max-width: 760px) {
+  .vocab-head { grid-template-columns: 1fr auto; }
+  .vocab-head .vocab-def { grid-column: 1 / -1; }
+  .vocab-head > .muted:nth-child(2) { display: none; }
+}
+.quiz .quiz-prompt-block, .quiz-prompt-block { display: block; }
+.quiz-prompt-block .quiz-status { float: right; margin-left: var(--s-3); }
+.quiz-prompt-block > :first-child, .quiz-prompt-block p:first-of-type { margin-top: 0; }
+.quiz-prompt-block blockquote { margin: var(--s-3) 0 0; padding-left: var(--s-4); border-left: var(--rule) solid var(--line-strong); font-weight: 400; }

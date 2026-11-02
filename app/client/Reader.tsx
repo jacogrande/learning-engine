@@ -7,7 +7,8 @@ import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Notes, type NotesHandle } from "./Notes";
 import { ChatPane } from "./Chat";
 import { Wrap } from "./Wrap";
-import { describe, paint, scrollToRange, type Quote } from "./selection";
+import { describe, paint, scrollToRange, sentenceAround, type Quote } from "./selection";
+import { capture } from "./Vocab";
 import { Link, NotFound, Shell } from "./App";
 
 type Sel = Quote & { x: number; y: number };
@@ -85,6 +86,17 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     return () => { clearTimeout(t); document.removeEventListener("mouseup", onUp); document.removeEventListener("keyup", onUp); document.removeEventListener("pointerdown", onDown); document.removeEventListener("selectionchange", onChange); };
   }, []);
 
+  // V adds the selected word to the vocabulary while the selection menu is up.
+  const actRef = useRef<(what: "vocab") => void>(() => {});
+  useEffect(() => {
+    if (!sel) return;
+    const on = (e: KeyboardEvent) => {
+      const typing = /^(INPUT|TEXTAREA)$/.test((e.target as HTMLElement).tagName) || (e.target as HTMLElement).isContentEditable;
+      if (e.key.toLowerCase() === "v" && !e.altKey && !e.ctrlKey && !e.metaKey && !typing) { e.preventDefault(); actRef.current("vocab"); }
+    };
+    document.addEventListener("keydown", on); return () => document.removeEventListener("keydown", on);
+  }, [sel]);
+
   // Re-anchor saved highlights after every render of the article; then honour a #hl-<id> link once.
   const jumped = useRef<string | null>(null);
   useLayoutEffect(() => {
@@ -122,8 +134,17 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const afterSections = mod.test ? { to: `${here}/test`, label: "Module test" } : { to: `${here}/wrap`, label: "Wrap up" };
   const read = (f: string) => !!progress?.read?.[f];
 
-  const act = (what: "note" | "drill" | "reading" | "chat") => {
+  const act = (what: "note" | "drill" | "reading" | "chat" | "vocab") => {
     if (!sel || !docPath) return;
+    if (what === "vocab") {
+      // A word the course itself defines in bold is a course term: it is reviewed with the course.
+      const s = sentenceAround(), word = (s?.word ?? sel.quote).trim();
+      const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const courseTerm = !!doc && new RegExp(`\\*\\*${esc}\\*\\*`, "i").test(doc.body);
+      capture({ word, context: s?.sentence ?? "", course: slug, doc: docPath, title, courseTerm });
+      setSel(null); getSelection()?.removeAllRanges();
+      return;
+    }
     const q: Quote = { quote: sel.quote, prefix: sel.prefix, suffix: sel.suffix };
     if (what === "note") {
       post(`/api/courses/${slug}/annotations`, { doc: docPath, ...q }).then(reloadAnnotations);
@@ -134,6 +155,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     if (what === "chat") { setChatDraft(q.quote); setPane("chat"); setDrawer("pane"); }
     setSel(null); getSelection()?.removeAllRanges();
   };
+
+  actRef.current = act;
 
   // Test score, once every question has an answer.
   const testSpecs = isTest && doc ? [...doc.body.matchAll(/```quiz\n([\s\S]*?)```/g)].map((m) => /^id:\s*(\S+)/m.exec(m[1])?.[1]).filter((x): x is string => !!x) : [];
@@ -216,6 +239,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             <button onClick={() => act("drill")}>Drill down</button>
             <button onClick={() => act("reading")}>Reading</button>
             <button onClick={() => act("chat")}>Chat</button>
+            <button onClick={() => act("vocab")} title="Add to your vocabulary (V)">Vocab</button>
           </div>
         )}
         {ask && (
