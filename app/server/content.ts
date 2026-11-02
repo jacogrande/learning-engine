@@ -28,8 +28,17 @@ export function parseDoc(src: string): Doc {
 }
 
 async function exists(p: string) { return stat(p).then(() => true, () => false); }
+// Parsed docs, reused while the file's mtime and size are unchanged: every page load reads every
+// module of every course, and most of those files have not changed since the last request.
+const parsed = new Map<string, { mtime: number; size: number; doc: Doc }>();
 async function readDoc(p: string): Promise<Doc | null> {
-  return (await exists(p)) ? parseDoc(await readFile(p, "utf8")) : null;
+  const s = await stat(p).catch(() => null);
+  if (!s?.isFile()) { parsed.delete(p); return null; }
+  const hit = parsed.get(p);
+  if (hit && hit.mtime === s.mtimeMs && hit.size === s.size) return structuredClone(hit.doc);
+  const doc = parseDoc(await readFile(p, "utf8"));
+  parsed.set(p, { mtime: s.mtimeMs, size: s.size, doc });
+  return structuredClone(doc);
 }
 async function mdFiles(dir: string): Promise<string[]> {
   if (!(await exists(dir))) return [];

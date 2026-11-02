@@ -11,8 +11,8 @@ type Summary = { dueCount: number; total: number; learned: number; suspended: nu
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
 type Queue = { mode: Mode; scope: string | null; items: Item[]; dueCount: number; remaining: number; topped: number; next: string | null; summary: Summary; last: Session | null };
-type CardStatus = { due: string; streak: number; state: string; reviews: number; last: { result: Answer["result"]; note: string | null; confidence: number | null; variant: number | null; review: string | null } | null };
-type Saved = Answer & { due?: string };
+type CardStatus = { due: string; streak: number; state: string; suspended?: boolean; reviews: number; last: { result: Answer["result"]; note: string | null; confidence: number | null; variant: number | null; review: string | null } | null };
+type Saved = Answer & { due?: string; leech?: boolean };
 
 const relTime = (iso: string | null) => {
   if (!iso) return "";
@@ -77,14 +77,14 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
     const pending: Saved = { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null };
     setSaved((s) => ({ ...s, [key(it)]: pending }));
-    post<{ review: { due: string } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant }).then((r) => {
-      if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due });   // MCQ: rated at once
+    post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant }).then((r) => {
+      if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
       // card stays "grading" in the tally rather than being counted as answered with no result.
       let tries = 0;
       clearInterval(timers.current[key(it)]);
       timers.current[key(it)] = setInterval(() => get<CardStatus>(`/api/review/cards/${it.course}/${it.question}`).then((c) => {
-        if (c.reviews > it.reviews && c.last) { clearInterval(timers.current[key(it)]); record(it, { ...pending, result: c.last.result, note: c.last.note, gradedAt: c.last.review, due: c.due }); }
+        if (c.reviews > it.reviews && c.last) { clearInterval(timers.current[key(it)]); record(it, { ...pending, result: c.last.result, note: c.last.note, gradedAt: c.last.review, due: c.due, leech: !!c.suspended }); }
         else if (++tries > 80) clearInterval(timers.current[key(it)]);
       }, () => { if (++tries > 80) clearInterval(timers.current[key(it)]); }), 1500);
     });
@@ -117,7 +117,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   const head = (
     <p className="meta review-head">
       <span>{s.dueCount} due · {s.total} cards · {s.learned} learned{s.streak ? ` · ${s.streak}-day streak` : ""}{s.suspended ? ` · ${s.suspended} suspended` : ""}</span>
-      <Link to="/review/stats">Stats</Link>
+      <span><Link to="/review/stats">Stats</Link> · <Link to="/review/cards">Cards</Link></span>
     </p>
   );
   const title = mode === "daily" ? "Review" : `Review · ${MODE_LABEL[mode]}`;
@@ -141,7 +141,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
           {mode !== "daily" && <Link to={slug ? `/c/${slug}/review` : "/review"} className="btn">Due today</Link>}
           {q.last && q.last.id !== session?.id && <span className="muted">Last session: {q.last.reviewed} reviewed, {q.last.correct} right · {new Date(q.last.startedAt).toLocaleDateString()}</span>}
         </div>
-        <ModeMenu courses={courses ?? []} current={{ mode, scope: scope ?? null }} restart={restart} />
+        <ModeMenu courses={courses ?? []} slug={slug} current={{ mode, scope: scope ?? null }} restart={restart} />
         <div className="actions">
           <button onClick={async () => { const r = await post<{ added: number }>("/api/review/seed", { course: courseScope }); if (r.added) restart(); else alert("Every question already has a card."); }} title={`One card per quiz question in ${courseScope ? "this course's" : "your"} modules, due now, so you can try review before answering lessons`}>Add dummy cards</button>
           {s.seeded > 0 && <button className="link" onClick={async () => { await post("/api/review/seed/clear", { course: courseScope }); restart(); }}>Remove {s.seeded} unreviewed dummy card{s.seeded === 1 ? "" : "s"}</button>}
@@ -170,11 +170,12 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
       <div className="actions">
         <button className="primary review-next" disabled={!answered} onClick={next}>{i + 1 < q.items.length ? "Next →" : "Finish"}</button>
         {answered && !graded && <span className="muted">Grading… you can move on.</span>}
-        {graded && due && <span className="muted">Next {relTime(due)}</span>}
+        {graded && due && !answered.leech && <span className="muted">Next {relTime(due)}</span>}
         <span className="spacer" />
         {graded && <button className="link" onClick={flag}>Flag grade</button>}
         <button className="link" title="Stop asking this question" onClick={suspend}>Suspend</button>
       </div>
+      {answered?.leech && <p className="quiz-explain hyper">This card has lapsed six times, so it is suspended and leaves the queue. Reread <Link to={sectionLink}>{item.sectionTitle}</Link>, then bring it back from <Link to="/review/cards">Cards</Link>.</p>}
       <p className="meta keys">1 · 2 · 3 confidence &nbsp; Enter check / next</p>
     </Shell>
   );
@@ -182,30 +183,33 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
 
 // Ad hoc modes. Each starts a fresh set; grading and scheduling work as in the daily queue. Picking
 // the mode already on screen (another burst, say) restarts it in place: navigating to the same URL is a no-op.
-function ModeMenu({ courses, current, restart }: { courses: Course[]; current: { mode: Mode; scope: string | null }; restart: () => void }) {
-  const [courseSel, setCourseSel] = useState(courses[0]?.slug ?? "");
+// On a course's review page every mode stays inside that course, and so does the URL.
+function ModeMenu({ courses, slug, current, restart }: { courses: Course[]; slug?: string; current: { mode: Mode; scope: string | null }; restart: () => void }) {
+  const [courseSel, setCourseSel] = useState(slug ?? courses[0]?.slug ?? "");
   const [moduleSel, setModuleSel] = useState("");
-  const mods = courses.find((c) => c.slug === (courseSel || courses[0]?.slug))?.modules.filter((m) => m.status === "ready") ?? [];
+  const pool = slug ? courses.filter((c) => c.slug === slug) : courses;
+  const mods = pool.find((c) => c.slug === (courseSel || pool[0]?.slug))?.modules.filter((m) => m.status === "ready") ?? [];
   const go = (mode: Mode, scope?: string) => {
     if (mode === current.mode && (scope ?? null) === current.scope) return restart();
-    navigate(`/review?mode=${mode}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`);
+    navigate(`${slug ? `/c/${slug}/review` : "/review"}?mode=${mode}${scope ? `&scope=${encodeURIComponent(scope)}` : ""}`);
   };
+  const where = slug ? "in this course" : "across every course";
   return (
     <div className="modes">
       <h2>More practice</h2>
       <div className="mode-row">
-        <button onClick={() => go("weak")}>Weak spots</button>
-        <span className="muted">Lapsed in the last month, partial or unmet objectives, or recorded error patterns. Up to 20.</span>
+        <button onClick={() => go("weak", slug)}>Weak spots</button>
+        <span className="muted">Lapsed in the last month, partial or unmet objectives, or recorded error patterns, {where}. Up to 20.</span>
       </div>
       <div className="mode-row">
-        <button onClick={() => go("burst")}>Burst</button>
-        <span className="muted">Ten random cards across every course.</span>
+        <button onClick={() => go("burst", slug)}>Burst</button>
+        <span className="muted">Ten random cards {where}.</span>
       </div>
       <div className="mode-row">
-        <select value={courseSel || courses[0]?.slug} onChange={(e) => { setCourseSel(e.target.value); setModuleSel(""); }}>{courses.map((c) => <option key={c.slug} value={c.slug}>{c.title}</option>)}</select>
-        <button onClick={() => go("course", courseSel || courses[0]?.slug)} disabled={!courses.length}>Whole course</button>
+        {!slug && <select value={courseSel || pool[0]?.slug} onChange={(e) => { setCourseSel(e.target.value); setModuleSel(""); }}>{pool.map((c) => <option key={c.slug} value={c.slug}>{c.title}</option>)}</select>}
+        <button onClick={() => go("course", courseSel || pool[0]?.slug)} disabled={!pool.length}>Whole course</button>
         <select value={moduleSel} onChange={(e) => setModuleSel(e.target.value)}><option value="">module…</option>{mods.map((m) => <option key={m.id} value={m.id}>{m.title}</option>)}</select>
-        <button onClick={() => go("module", `${courseSel || courses[0]?.slug}/${moduleSel}`)} disabled={!moduleSel}>Module</button>
+        <button onClick={() => go("module", `${courseSel || pool[0]?.slug}/${moduleSel}`)} disabled={!moduleSel}>Module</button>
       </div>
     </div>
   );

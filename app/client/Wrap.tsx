@@ -25,7 +25,7 @@ export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod:
   const next = course.modules[n + 1];
 
   // 3. Finished: show the understanding summary.
-  if (p.completedAt && mod.understanding) return <Understanding slug={slug} mod={mod} next={next} />;
+  if (p.completedAt && mod.understanding) return <Understanding slug={slug} mod={mod} next={next} progress={p} />;
 
   // 2. Discussing.
   if (p.chat) return (
@@ -51,7 +51,7 @@ export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod:
       <p className="lede">Explain this module to a smart colleague who missed it. Cover what it claims, how it works, one worked example of your own, and where it stops applying. Write it from memory; the sections stay closed.</p>
       <ul className="objectives wrap-objectives">{mod.objectives.map((o, i) => <li key={o.id ?? i}>{objectiveText(o)}</li>)}</ul>
       <Editor ref={editor} value={p.summary ?? ""} placeholder="Start with the main claim." className="wrap-editor" onChange={save} />
-      <p className="muted cram">Want a warm-up first? <Link to={`/review?mode=cram&scope=${slug}/${mod.id}`}>Cram this module's questions</Link> (variants preferred), then come back and write.</p>
+      <p className="muted cram">Want a warm-up first? <Link to={`/c/${slug}/review?mode=cram&scope=${slug}/${mod.id}`}>Cram this module's questions</Link> (variants preferred), then come back and write.</p>
       <footer className="article-foot">
         <span className="muted">{words} words{words > 0 && words < 120 ? " · aim for 150–400" : ""}</span>
         <button className="primary" disabled={words < 60} onClick={async () => { clearTimeout(timer.current); await put(url, { summary: draft }); await post(`/api/courses/${slug}/modules/${mod.id}/discuss`, { summary: draft }); reload(); }}>Start discussion</button>
@@ -60,7 +60,7 @@ export function Wrap({ slug, course, mod }: { slug: string; course: Course; mod:
   );
 }
 
-function Understanding({ slug, mod, next }: { slug: string; mod: Module; next?: Module }) {
+function Understanding({ slug, mod, next, progress }: { slug: string; mod: Module; next?: Module; progress: Progress }) {
   const { data: doc } = useLive<Doc>(`/api/courses/${slug}/doc?path=modules/${mod.id}/understanding.md`);
   const u = mod.understanding!;
   return (
@@ -76,6 +76,8 @@ function Understanding({ slug, mod, next }: { slug: string; mod: Module; next?: 
         {u.calibration && <p className="muted"><strong>Calibration.</strong> {u.calibration}</p>}
       </div>
       {doc && <Markdown body={doc.body} />}
+      {progress.summary && <details className="wrap-summary"><summary>Your explanation</summary><Markdown body={progress.summary} /></details>}
+      {progress.chat && <details className="wrap-summary"><summary>The discussion</summary><div className="wrap-chat"><Thread id={progress.chat} hideContext readOnly /></div></details>}
       <footer className="article-foot">
         <Link to={`/c/${slug}`} className="btn">← Outline</Link>
         {next ? (next.status === "ready" ? <Link to={`/c/${slug}/m/${next.id}`} className="btn">{next.title} →</Link> : <GenerateNext slug={slug} next={next} />) : <span className="muted">Last module.</span>}

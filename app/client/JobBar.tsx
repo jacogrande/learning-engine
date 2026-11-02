@@ -1,6 +1,7 @@
 // Slim strip at the bottom while Claude is working. Click to see the log.
-import { useEffect, useState } from "react";
-import { get, post, useJobs, type Job } from "./api";
+import { useCallback, useEffect, useState } from "react";
+import { get, post, useEvent, useJobs, type Job } from "./api";
+import { Link } from "./App";
 
 const label = (j: Job) => ({
   start: `Starting course: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
@@ -24,11 +25,13 @@ export function JobBar() {
     load(); const t = setInterval(load, 1500); return () => clearInterval(t);
   }, [open, job?.id, job?.activity]);
 
-  if (!job) return null;
+  if (!job) return <Toasts />;
   const secs = job.startedAt ? Math.floor((Date.now() - +new Date(job.startedAt)) / 1000) : 0;
   const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 
   return (
+    <>
+    <Toasts />
     <div className={`jobbar ${open ? "open" : ""}`}>
       <div className="jobbar-row" onClick={() => setOpen(!open)}>
         <span className="pulse" />
@@ -37,6 +40,39 @@ export function JobBar() {
         <button className="link" onClick={(e) => { e.stopPropagation(); post(`/api/jobs/${job.id}/cancel`); }}>cancel</button>
       </div>
       {open && <pre className="jobbar-log">{log.join("\n") || "…"}</pre>}
+    </div>
+    </>
+  );
+}
+
+// What finished while you were reading: a drill-down or reading ready to open, or a long job that
+// failed. Stays until dismissed or opened, so it is not missed in another tab.
+type Toast = { id: number; text: string; to?: string | null; bad?: boolean };
+const NOUN: Partial<Record<Job["kind"], string>> = { start: "Starting the course", assess: "The baseline assessment", outline: "The outline", module: "Generating the module", test: "Writing the module test", wrap: "The wrap-up", drilldown: "The drill-down", reading: "The reading list" };
+let seq = 0;
+function Toasts() {
+  const [list, setList] = useState<Toast[]>([]);
+  const push = (t: Omit<Toast, "id">) => setList((l) => [...l.slice(-3), { ...t, id: ++seq }]);
+  useEvent("notice", useCallback((ev: any) => {
+    const what = ev.kind === "drilldown" ? "Drill-down" : "Reading list";
+    if (ev.ok) push({ text: `${what} ready: ${ev.title}`, to: ev.to });
+    else push({ text: `${what} finished, but no new page turned up. Check the module's sidebar.`, bad: true });
+  }, []));
+  useEvent("job", useCallback((ev: { job: Job }) => {
+    const j = ev.job, noun = NOUN[j.kind];
+    if (noun && j.status === "failed") push({ text: `${noun} failed${j.error ? `: ${j.error.slice(0, 140)}` : "."}`, bad: true });
+  }, []));
+  if (!list.length) return null;
+  const close = (id: number) => setList((l) => l.filter((t) => t.id !== id));
+  return (
+    <div className="toasts" role="status">
+      {list.map((t) => (
+        <div key={t.id} className={`toast ${t.bad ? "is-bad" : ""}`}>
+          <span>{t.text}</span>
+          {t.to && <span onClick={() => close(t.id)}><Link to={t.to} className="btn primary">Open</Link></span>}
+          <button className="link" aria-label="Dismiss" onClick={() => close(t.id)}>×</button>
+        </div>
+      ))}
     </div>
   );
 }

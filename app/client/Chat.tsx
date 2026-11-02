@@ -1,11 +1,12 @@
 // Chats scoped to one section. A new chat starts from a selection (its context) or from nothing.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { get, post, useEvent, useLive, useJobs, type Chat as ChatRow, type Message } from "./api";
+import { del, get, post, put, useEvent, useLive, useJobs, type Chat as ChatRow, type Message } from "./api";
 import { Markdown } from "./Markdown";
 
-export function ChatPane({ slug, doc, draft, onDraftUsed }: { slug: string; doc: string; draft: string | null; onDraftUsed: () => void }) {
+export function ChatPane({ slug, doc, draft, onDraftUsed, open }: { slug: string; doc: string; draft: string | null; onDraftUsed: () => void; open?: string | null }) {
   const { data: chats, reload } = useLive<ChatRow[]>(`/api/courses/${slug}/chats?doc=${encodeURIComponent(doc)}`);
-  const [active, setActive] = useState<string | null>(null);
+  const [active, setActive] = useState<string | null>(open ?? null);
+  useEffect(() => { if (open) setActive(open); }, [open]);
   useEffect(() => { if (draft) setActive(null); }, [draft]);
 
   if (active) return <Thread id={active} onBack={() => { setActive(null); reload(); }} />;
@@ -21,15 +22,31 @@ export function ChatPane({ slug, doc, draft, onDraftUsed }: { slug: string; doc:
       />
       {chats && chats.length > 0 && (
         <ul className="chat-list">
-          {chats.map((c) => <li key={c.id}><button className="link" onClick={() => setActive(c.id)}>{c.title}</button><span className="muted"> · {new Date(c.createdAt).toLocaleDateString()}</span></li>)}
+          {chats.map((c) => (
+            <li key={c.id}>
+              <button className="link" onClick={() => setActive(c.id)}>{c.title}</button><span className="muted"> · {new Date(c.createdAt).toLocaleDateString()}</span>
+              <span className="chat-row-actions"><ChatActions chat={c} onChange={reload} /></span>
+            </li>
+          ))}
         </ul>
       )}
     </div>
   );
 }
 
-// A thread. `onTurns` reports how many assistant replies exist (the wrap-up gates on it).
-export function Thread({ id, onBack, onTurns, hideContext }: { id: string; onBack?: () => void; onTurns?: (n: number) => void; hideContext?: boolean }) {
+// Rename or delete a section chat.
+export function ChatActions({ chat, onChange }: { chat: ChatRow; onChange: () => void }) {
+  return (
+    <>
+      <button className="link" title="Rename" onClick={async () => { const t = prompt("Name this chat", chat.title); if (t?.trim()) { await put(`/api/chats/${chat.id}`, { title: t }); onChange(); } }}>rename</button>
+      <button className="link" title="Delete" onClick={async () => { if (confirm(`Delete “${chat.title}”? This cannot be undone.`)) { await del(`/api/chats/${chat.id}`); onChange(); } }}>delete</button>
+    </>
+  );
+}
+
+// A thread. `onTurns` reports how many assistant replies exist (the wrap-up gates on it). `readOnly`
+// drops the composer: a finished wrap-up discussion, or a chat shown in the notebook.
+export function Thread({ id, onBack, onTurns, hideContext, readOnly }: { id: string; onBack?: () => void; onTurns?: (n: number) => void; hideContext?: boolean; readOnly?: boolean }) {
   const [chat, setChat] = useState<ChatRow | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<string | null>(null);   // assistant text streaming in
@@ -46,7 +63,7 @@ export function Thread({ id, onBack, onTurns, hideContext }: { id: string; onBac
     else if (ev.reset) setPending("");
     else setPending((p) => (p ?? "") + ev.delta);
   }, [id]));
-  useEffect(() => { end.current?.scrollIntoView({ block: "end" }); onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
+  useEffect(() => { if (!readOnly) end.current?.scrollIntoView({ block: "end" }); onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
 
   return (
     <div className="chat">
@@ -57,7 +74,7 @@ export function Thread({ id, onBack, onTurns, hideContext }: { id: string; onBac
         {pending !== null && <div className="msg msg-assistant">{pending ? <Markdown body={pending} /> : <span className="muted">Thinking…</span>}</div>}
         <div ref={end} />
       </div>
-      <Composer placeholder="Reply" disabled={pending !== null} onSend={async (content) => { setMessages((m) => [...m, { id: "tmp" + Date.now(), role: "user", content }]); setPending(""); await post(`/api/chats/${id}/messages`, { content }); }} />
+      {!readOnly && <Composer placeholder="Reply" disabled={pending !== null} onSend={async (content) => { setMessages((m) => [...m, { id: "tmp" + Date.now(), role: "user", content }]); setPending(""); await post(`/api/chats/${id}/messages`, { content }); }} />}
     </div>
   );
 }

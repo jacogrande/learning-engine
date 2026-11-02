@@ -6,6 +6,8 @@ import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
 import { ReviewPage } from "./Review";
 import { StatsPage } from "./Stats";
+import { CardsPage } from "./Cards";
+import { NotebookPage } from "./Notebook";
 
 // A server started before the client was updated still sends objectives as strings.
 export const objectiveText = (o: { text?: string } | string) => (typeof o === "string" ? o : o.text ?? "");
@@ -23,14 +25,28 @@ export const Link = ({ to, children, className }: { to: string; children: ReactN
 
 export function App() {
   const path = usePath();
-  if (path === "/review/stats") return <><StatsPage /><JobBar /></>;
-  if (path === "/review") { const sp = new URLSearchParams(location.search); return <><ReviewPage key={location.search} mode={(sp.get("mode") as any) ?? undefined} scope={sp.get("scope") ?? undefined} /><JobBar /></>; }
-  const m = /^\/c\/([^/]+)(?:\/(baseline|review)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
+  const sp = new URLSearchParams(location.search);
+  const mode = (sp.get("mode") as any) ?? undefined, scope = sp.get("scope") ?? undefined;
+  const m = /^\/c\/([^/]+)(?:\/(baseline|review|notebook)|\/m\/([^/]+)(?:\/(.+))?)?$/.exec(path);
+  const page =
+    path === "/" ? <Courses />
+    : path === "/review/stats" ? <StatsPage />
+    : path === "/review/cards" ? <CardsPage />
+    : path === "/review" ? <ReviewPage key={location.search} mode={mode} scope={scope} />
+    : !m ? <NotFound />
+    : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} />
+    : m[2] === "review" ? <ReviewPage key={location.search} slug={m[1]} mode={mode} scope={scope} />
+    : m[2] === "notebook" ? <NotebookPage slug={m[1]} />
+    : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />;
+  return <>{page}<JobBar /></>;
+}
+
+export function NotFound({ crumbs = [], what = "page" }: { crumbs?: Crumb[]; what?: string }) {
   return (
-    <>
-      {!m ? <Courses /> : m[3] ? <Reader slug={m[1]} moduleId={m[3]} file={m[4]} /> : m[2] === "review" ? <ReviewPage slug={m[1]} /> : <CoursePage slug={m[1]} tab={m[2] ? "baseline" : "outline"} />}
-      <JobBar />
-    </>
+    <Shell crumbs={[...crumbs, { label: "Not found" }]} className="page">
+      <h1>No such {what}</h1>
+      <p className="muted empty">It may have been renamed or removed. <Link to={crumbs.at(-1)?.to ?? "/"}>Back to {crumbs.at(-1)?.label ?? "courses"} →</Link></p>
+    </Shell>
   );
 }
 
@@ -47,11 +63,17 @@ export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; childr
             <span key={i}><span className="sep">/</span>{c.to ? <Link to={c.to}>{c.label}</Link> : <span className="current">{c.label}</span>}</span>
           ))}
         </nav>
-        <div className="top-right"><Sync /><Theme /></div>
+        <div className="top-right"><ReviewLink /><Sync /><Theme /></div>
       </header>
       <div className={className}>{children}</div>
     </>
   );
+}
+
+// Always one click from review, wherever you are.
+function ReviewLink() {
+  const { data: rv } = useLive<{ dueCount: number }>("/api/review/summary", ["answer", "card"]);
+  return <Link to="/review" className={`top-review ${rv?.dueCount ? "has-due" : ""}`}>Review{rv?.dueCount ? <span className="level due">{rv.dueCount}</span> : null}</Link>;
 }
 
 // Library sync state. Click to pull and push now.
@@ -75,6 +97,7 @@ function Theme() {
     if (v === "system") { localStorage.removeItem("theme"); delete document.documentElement.dataset.theme; }
     else { localStorage.setItem("theme", v); document.documentElement.dataset.theme = v; }
     setT(v);
+    dispatchEvent(new Event("themechange"));   // diagrams re-render in the new palette
   };
   return (
     <div className="theme">{["system", "light", "dark"].map((v) => <button key={v} aria-pressed={t === v} onClick={() => pick(v)}>{v}</button>)}</div>
@@ -87,9 +110,19 @@ function Courses() {
   const jobs = useJobs();
   const starting = jobs.filter((j) => j.kind === "start");
   const [open, setOpen] = useState(false);
-  const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer"]);
-  const status = (c: Course) =>
-    c.stage === "baseline" ? "Baseline waiting" : c.stage === "assessed" ? "Outline pending" : `${c.modules.filter((m) => m.status === "ready").length} of ${c.modules.length} modules generated`;
+  const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer", "card"]);
+  const status = (c: Course) => {
+    if (c.stage === "baseline") return "Baseline waiting";
+    if (c.stage === "assessed") return "Outline pending";
+    const done = c.progress?.done ?? 0, n = c.modules.length;
+    return done === n ? `All ${n} modules done` : `${done} of ${n} modules done`;
+  };
+  const resume = (c: Course) => {
+    const r = c.progress?.resume;
+    if (r) return <Link to={`/c/${c.slug}/m/${r.module}/${r.file}`} className="btn resume">Resume · {r.moduleTitle} · {r.title} →</Link>;
+    if (c.progress?.nextToGenerate) return <Link to={`/c/${c.slug}`} className="btn resume">Next module not generated yet →</Link>;
+    return null;
+  };
   return (
     <Shell crumbs={[{ label: "Courses" }]} className="page">
       <div className="page-head"><h1>Courses</h1>{!open && <button className="primary" onClick={() => setOpen(true)}>New course</button>}</div>
@@ -112,6 +145,7 @@ function Courses() {
               <h2>{c.title}</h2>
               <p className="muted">{status(c)}{c.depth ? ` · ${c.depth}` : ""}</p>
             </Link>
+            {resume(c)}
           </li>
         ))}
       </ul>
@@ -151,8 +185,8 @@ function NewCourse({ onDone }: { onDone: () => void }) {
 function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }) {
   const { data: course, error } = useLive<Course>(`/api/courses/${slug}`);
   const { data: state, reload } = useLive<QuizState>(`/api/courses/${slug}/quiz/baseline`);
-  const { data: review } = useLive<{ dueCount: number; total: number }>(`/api/courses/${slug}/review`, ["answer"]);
-  if (error) return <Shell crumbs={[{ label: "Courses", to: "/" }, { label: slug }]} className="page"><p>Course not found.</p></Shell>;
+  const { data: review } = useLive<{ dueCount: number; total: number }>(`/api/courses/${slug}/review`, ["answer", "card"]);
+  if (error) return <NotFound crumbs={[{ label: "Courses", to: "/" }]} what="course" />;
   if (!course || !state) return null;
   return (
     <Shell crumbs={[{ label: "Courses", to: "/" }, { label: course.title }]} className="page">
@@ -166,6 +200,7 @@ function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }
         {review && review.total > 0 && (
           <Link to={`/c/${slug}/review`}>Review{review.dueCount > 0 ? <span className="level due">{review.dueCount} due</span> : null}</Link>
         )}
+        {course.stage === "ready" && <Link to={`/c/${slug}/notebook`}>Notebook</Link>}
       </nav>
       {tab === "outline" ? <Outline course={course} /> : <Baseline slug={slug} state={state} reload={reload} />}
     </Shell>

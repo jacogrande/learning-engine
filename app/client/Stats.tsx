@@ -62,7 +62,7 @@ export function StatsPage() {
           {msg && <p className="muted">{msg}</p>}
         </div>
       </div>
-      <p className="actions"><Link to="/review" className="btn">← Review</Link></p>
+      <p className="actions"><Link to="/review" className="btn">← Review</Link><Link to="/review/cards" className="btn">Suspended, flagged and orphaned cards</Link></p>
     </Shell>
   );
 }

@@ -1,13 +1,13 @@
 // `bun run dev` — serves the client (bundled by Bun) and the API.
 import index from "./client/index.html";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { NOTES_DIR, listCourses, getCourse, getDoc } from "./server/content";
+import { COURSES_DIR, NOTES_DIR, listCourses, getCourse, getDoc, type Course } from "./server/content";
 import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
+import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -138,6 +138,62 @@ function saveProgress(course: string, mod: string, patch: Record<string, any>) {
   broadcast({ type: "progress", course, module: mod });
   return next;
 }
+// A card exists and has at least one review in its log (dummy cards have none).
+const cardReviewed = (course: string, qid: string) => ((db.query("SELECT log FROM cards WHERE course=? AND question=?").get(course, qid) as any)?.log ?? "[]") !== "[]";
+
+// Where to pick a course up: the first generated module not yet finished, at its first unread
+// section (or its test or wrap-up once every section is read). Null when nothing generated is open.
+function resumeOf(c: Course) {
+  const done = c.modules.filter((m) => progressOf(c.slug, m.id).completedAt).length;
+  for (const m of c.modules) {
+    const p = progressOf(c.slug, m.id);
+    if (p.completedAt) continue;
+    if (m.status !== "ready") return { done, resume: null, nextToGenerate: m.id };
+    const unread = m.sections.find((s) => !p.read?.[s.file]);
+    const target = unread ? { file: unread.file, title: unread.title } : m.test && !p.summary ? { file: "test", title: "Module test" } : { file: "wrap", title: "Wrap up" };
+    return { done, resume: { module: m.id, moduleTitle: m.title, ...target }, nextToGenerate: null };
+  }
+  return { done, resume: null, nextToGenerate: null };
+}
+
+// Everything the learner wrote or kept in a course, for the notebook page.
+async function notebook(slug: string) {
+  const files = await readdir(join(NOTES_DIR, slug)).catch(() => [] as string[]);
+  const notes: Record<string, string> = {};
+  for (const f of files.filter((f) => f.endsWith(".md"))) notes[f.slice(0, -3)] = await readFile(join(NOTES_DIR, slug, f), "utf8").catch(() => "");
+  const progress = Object.fromEntries((db.query("SELECT module, data FROM progress WHERE course=?").all(slug) as any[]).map((r) => [r.module, JSON.parse(r.data)]));
+  const highlights = db.query("SELECT id, doc, quote, created_at createdAt FROM annotations WHERE course=? ORDER BY created_at").all(slug);
+  // `body` is every message's text, so the notebook can search inside conversations.
+  const chats = db.query(`SELECT c.id, c.doc, c.kind, c.module, c.context, c.title, c.created_at createdAt, c.updated_at updatedAt, count(m.id) messages, group_concat(m.content, ' ') body
+                          FROM chats c LEFT JOIN messages m ON m.chat=c.id WHERE c.course=? GROUP BY c.id ORDER BY c.updated_at DESC`).all(slug);
+  return { notes, progress, highlights, chats };
+}
+
+// A drill-down or reading started from the module test or from another extra still has to hang off
+// something the sidebar lists: the test, or the section the source extra came from.
+async function sectionHint(course: string, doc: string) {
+  const file = doc.split("/").slice(2).join("/");
+  if (!file.includes("/") && file !== "quiz.md") return "";
+  const parent = file === "quiz.md" ? "quiz.md" : ((await getDoc(course, doc))?.frontmatter.section ?? "");
+  return parent ? `\n\nSet \`section: ${parent}\` in the new file's frontmatter (the passage comes from ${file === "quiz.md" ? "the module test" : `a ${file.startsWith("drilldowns/") ? "drill-down" : "reading"} on that section`}).` : "";
+}
+
+// After a drill-down or reading job: tell the page the new file exists, so it can offer a link.
+async function announceExtra(course: string, doc: string, kind: "drilldown" | "reading", startedAt?: string) {
+  const mod = /^modules\/([^/]+)\//.exec(doc)?.[1];
+  const c = mod ? await getCourse(course) : null;
+  const m = c?.modules.find((x) => x.id === mod);
+  const dir = join(COURSES_DIR, course, "modules", mod ?? "", kind === "drilldown" ? "drilldowns" : "readings");
+  const since = startedAt ? +new Date(startedAt) : 0;
+  let newest: { file: string; t: number } | null = null;
+  for (const f of await readdir(dir).catch(() => [] as string[])) {
+    const t = (await stat(join(dir, f)).catch(() => null))?.mtimeMs ?? 0;
+    if (f.endsWith(".md") && t >= since && (!newest || t > newest.t)) newest = { file: f, t };
+  }
+  const extra = newest && m?.extras.find((e) => e.file.endsWith(`/${newest!.file}`));
+  broadcast({ type: "notice", kind, course, ok: !!extra, title: extra?.title ?? null, to: extra ? `/c/${course}/m/${mod}/${extra.file}` : null });
+}
+
 // Everything the wrap-up judges from: the explanation, the discussion, every answer with its
 // objective and confidence, and the review schedule.
 async function evidence(course: string, mod: string) {
@@ -192,7 +248,7 @@ Bun.serve({
   routes: {
     "/api/events": (req) => sse(req),
     "/api/courses": {
-      GET: async () => json(await listCourses()),
+      GET: async () => json((await listCourses()).map((c) => ({ ...c, progress: resumeOf(c) }))),
       // New course from the app: the clarifying answers come with the request, so the skill skips its questions.
       POST: async (req) => {
         const b = (await req.json()) as { subject: string; depth?: string; know?: string; goals?: string; produce?: string; angle?: string };
@@ -249,12 +305,18 @@ Bun.serve({
 
     // --- in-lesson answers ---------------------------------------------
     "/api/courses/:slug/answers": {
-      GET: (req) => json(db.query(`SELECT a.question, a.answer, a.result, a.note, a.job, a.confidence, a.graded_at gradedAt, c.due, c.state
-                                   FROM answers a LEFT JOIN cards c ON c.course=a.course AND c.question=a.question WHERE a.course=? AND a.doc=?`).all(req.params.slug, q(req, "doc"))),
-      // Confidence is recorded before feedback; the result feeds the spaced-review schedule.
+      GET: (req) => json((db.query(`SELECT a.question, a.answer, a.result, a.note, a.job, a.confidence, a.history, a.graded_at gradedAt, c.due, c.state
+                                   FROM answers a LEFT JOIN cards c ON c.course=a.course AND c.question=a.question WHERE a.course=? AND a.doc=?`).all(req.params.slug, q(req, "doc")) as any[])
+                          .map((a) => ({ ...a, history: JSON.parse(a.history ?? "[]") }))),
+      // Confidence is recorded before feedback. Only the first lesson answer rates the card: after that
+      // the schedule belongs to review, and re-checking a lesson question must not move due dates.
+      // Earlier lesson answers are kept in `history`.
       POST: async (req) => {
         const slug = req.params.slug;
         const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
+        const firstRating = !cardReviewed(slug, qid);
+        const prev = db.query("SELECT answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE course=? AND question=?").get(slug, qid) as any;
+        const history = prev ? [...JSON.parse(prev.history ?? "[]"), { answer: prev.answer, result: prev.result, note: prev.note, confidence: prev.confidence, gradedAt: prev.gradedAt }].slice(-10) : [];
         let job: string | null = null;
         if (type === "short") {
           job = gradeShort(slug, doc, qid, answer, null, (g, jobId) => {
@@ -262,15 +324,16 @@ Bun.serve({
             const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobId]);
             if (!r.changes) return;
             state.answer(slug, qid);
-            rate(slug, qid, doc, g.result, confidence);
+            if (firstRating) rate(slug, qid, doc, g.result, confidence);
             broadcast({ type: "answer", course: slug, doc, question: qid });
           });
         }
-        db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, confidence, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?)
-                ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
-          [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, now(), type === "mcq" ? now() : null]);
+        db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, confidence, history, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
+                ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, history=excluded.history, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
+          [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, JSON.stringify(history), now(), type === "mcq" ? now() : null]);
         state.answer(slug, qid);
-        const review = type === "mcq" && result ? rate(slug, qid, doc, result as any, confidence) : null;
+        const review = type === "mcq" && result && firstRating ? rate(slug, qid, doc, result as any, confidence) : null;
+        if (review) broadcast({ type: "card", course: slug, question: qid });
         return json({ ok: true, job, review });
       },
     },
@@ -291,9 +354,13 @@ Bun.serve({
     // --- notes: one markdown file per module, readable by Claude --------
     "/api/courses/:slug/notes/:module": {
       GET: async (req) => json({ markdown: await readFile(notesPath(req.params.slug, req.params.module), "utf8").catch(() => "") }),
+      // `base` is the text the editor last loaded or saved. If the file has moved on since (another
+      // machine's notes arrived in a pull), refuse and hand back the file so the page can ask.
       PUT: async (req) => {
-        const { markdown } = (await req.json()) as { markdown: string };
+        const { markdown, base, force } = (await req.json()) as { markdown: string; base?: string; force?: boolean };
         const p = notesPath(req.params.slug, req.params.module);
+        const disk = await readFile(p, "utf8").catch(() => "");
+        if (!force && base !== undefined && disk !== base && disk !== markdown) return json({ conflict: true, markdown: disk }, 409);
         await mkdir(join(p, ".."), { recursive: true });
         await writeFile(p, markdown);
         sync.touch();
@@ -312,7 +379,27 @@ Bun.serve({
         return json(chatWithMessages(chat.id));
       },
     },
-    "/api/chats/:id": (req) => json(chatWithMessages(req.params.id)),
+    "/api/chats/:id": {
+      GET: (req) => json(chatWithMessages(req.params.id)),
+      PUT: async (req) => {
+        const { title } = (await req.json()) as { title: string };
+        if (!title?.trim()) return json({ error: "title required" }, 400);
+        db.run("UPDATE chats SET title=? WHERE id=?", [title.trim().slice(0, 120), req.params.id]);
+        state.chat(req.params.id);
+        return json({ ok: true });
+      },
+      // Section chats only: the wrap-up discussion is evidence for the module's understanding summary.
+      DELETE: (req) => {
+        const c = db.query("SELECT kind FROM chats WHERE id=?").get(req.params.id) as any;
+        if (!c) return json({ error: "not found" }, 404);
+        if (c.kind !== "section") return json({ error: "the wrap-up discussion cannot be deleted" }, 400);
+        db.run("DELETE FROM chats WHERE id=?", [req.params.id]);
+        state.chatDeleted(req.params.id);
+        broadcast({ type: "content" });
+        return json({ ok: true });
+      },
+    },
+    "/api/courses/:slug/notebook": async (req) => json(await notebook(req.params.slug)),
     "/api/chats/:id/messages": {
       POST: async (req) => {
         const chat = db.query("SELECT * FROM chats WHERE id=?").get(req.params.id) as any;
@@ -326,14 +413,14 @@ Bun.serve({
     "/api/courses/:slug/drilldown": {
       POST: async (req) => {
         const { doc, quote, guidance } = (await req.json()) as { doc: string; quote: string; guidance?: string };
-        const prompt = `/drill-down ${req.params.slug} ${doc}\n\nSelected passage:\n${quoteBlock(quote)}${guidance ? `\n\nLearner's guidance: ${guidance}` : ""}`;
-        return json(enqueue(req.params.slug, "drilldown", prompt, { ref: doc }));
+        const prompt = `/drill-down ${req.params.slug} ${doc}${await sectionHint(req.params.slug, doc)}\n\nSelected passage:\n${quoteBlock(quote)}${guidance ? `\n\nLearner's guidance: ${guidance}` : ""}`;
+        return json(enqueue(req.params.slug, "drilldown", prompt, { ref: doc, then: (_r, job) => announceExtra(req.params.slug, doc, "drilldown", job.startedAt) }));
       },
     },
     "/api/courses/:slug/reading": {
       POST: async (req) => {
         const { doc, quote } = (await req.json()) as { doc: string; quote: string };
-        return json(enqueue(req.params.slug, "reading", `/find-reading ${req.params.slug} ${doc}\n\nSelected passage:\n${quoteBlock(quote)}`, { ref: doc }));
+        return json(enqueue(req.params.slug, "reading", `/find-reading ${req.params.slug} ${doc}${await sectionHint(req.params.slug, doc)}\n\nSelected passage:\n${quoteBlock(quote)}`, { ref: doc, then: (_r, job) => announceExtra(req.params.slug, doc, "reading", job.startedAt) }));
       },
     },
 
@@ -379,7 +466,7 @@ Bun.serve({
       const mode = (u.searchParams.get("mode") ?? "daily") as Mode;
       const scope = u.searchParams.get("scope") ?? u.searchParams.get("course") ?? undefined;
       const cap = u.searchParams.get("cap") ? Number(u.searchParams.get("cap")) : undefined;
-      const course = mode === "daily" || mode === "course" ? scope : mode === "module" || mode === "cram" ? scope?.split("/")[0] : undefined;
+      const course = mode === "module" || mode === "cram" ? scope?.split("/")[0] : scope;
       return json({ ...(await queue({ mode, scope, cap, exclude })), summary: summary(course), last: lastSession() });
     },
     "/api/review/settings": {
@@ -408,17 +495,22 @@ Bun.serve({
         }
         if (!result) return json({ error: "result required for mcq" }, 400);
         pendingReviewGrades.delete(key);
-        return json({ ok: true, job: null, review: rate(course, qid, doc, result, confidence, vi, { answer }) });
+        const review = rate(course, qid, doc, result, confidence, vi, { answer });
+        broadcast({ type: "card", course, question: qid });
+        return json({ ok: true, job: null, review });
       },
     },
     "/api/review/cards/:course/:question": (req) => { const c = cardStatus(req.params.course, req.params.question); return c ? json(c) : json({ error: "not found" }, 404); },
     "/api/review/sessions": { POST: async (req) => { const { kind, scope } = (await req.json()) as { kind: string; scope?: string }; return json(startSession(kind, scope ?? null)); } },
     "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
-    "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); return json({ ok: true }); } },
-    "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); return json({ ok: true }); } },
-    "/api/review/seed": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ added: await seed(course) }); } },
-    "/api/review/seed/clear": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ removed: clearSeeded(course) }); } },
+    "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
+    "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
+    "/api/review/seed": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; const added = await seed(course); broadcast({ type: "card" }); return json({ added }); } },
+    "/api/review/seed/clear": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; const removed = clearSeeded(course); broadcast({ type: "card" }); return json({ removed }); } },
     "/api/review/suspended": async (req) => json(await suspendedCards(new URL(req.url).searchParams.get("course") ?? undefined)),
+    "/api/review/cards": async (req) => json(Object.fromEntries(await Promise.all((["suspended", "flagged", "orphaned"] as const).map(async (k) => [k, await cardList(k)])))),
+    // Only orphans can be removed: a card whose question still exists would just come back.
+    "/api/review/cards/:course/:question/delete": { POST: (req) => { const c = db.query("SELECT state FROM cards WHERE course=? AND question=?").get(req.params.course, req.params.question) as any; if (c?.state !== "orphaned") return json({ error: "only orphaned cards can be removed" }, 400); deleteCard(req.params.course, req.params.question); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
 
     "/api/sync": {
       GET: () => json(sync.status),

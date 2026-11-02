@@ -51,14 +51,19 @@ function stateOf(card: Card, streak: number, reviews: number, suspended: boolean
   return "learning";
 }
 
-// A leech: six lapses after learning, or six Again ratings in a row at any stage.
-const isLeech = (card: Card, logs: any[]) =>
-  card.lapses >= LEECH_LAPSES || (logs.length >= LEECH_LAPSES && logs.slice(-LEECH_LAPSES).every((l: any) => l.rating === Rating.Again));
+// A leech: six lapses after learning, or six Again ratings in a row at any stage. Both count from
+// `base`, where the card stood when the learner last unsuspended it, so a revived leech gets a fresh run.
+type LeechBase = { lapses: number; reviews: number } | null;
+const isLeech = (card: Card, logs: any[], base: LeechBase = null) => {
+  const lapses = card.lapses - (base?.lapses ?? 0), recent = logs.slice(base?.reviews ?? 0);
+  return lapses >= LEECH_LAPSES || (recent.length >= LEECH_LAPSES && recent.slice(-LEECH_LAPSES).every((l: any) => l.rating === Rating.Again));
+};
+const baseOf = (row: any): LeechBase => (row?.leech_base ? JSON.parse(row.leech_base) : null);
 
 // Review answers live in the card's log (answer and grader note), not in the lesson's `answers` row.
 export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string } = {}) {
   if (doc.startsWith("quizzes/")) return null;   // baseline: no card
-  const row = db.query("SELECT card, streak, log, suspended, last_variant FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  const row = db.query("SELECT card, streak, log, suspended, last_variant, leech_base FROM cards WHERE course=? AND question=?").get(course, question) as any;
   const prev: Card = row ? revive(JSON.parse(row.card)) : createEmptyCard(new Date());
   const r = rating(result, confidence);
   const { card, log } = scheduler().next(prev, new Date(), r);
@@ -67,7 +72,7 @@ export function rate(course: string, question: string, doc: string, result: Resu
   const module = /^modules\/([^/]+)\//.exec(doc)?.[1] ?? null;
   let suspended = !!row?.suspended;
   let leech = false;
-  if (!suspended && isLeech(card, logs)) { suspended = true; leech = true; }
+  if (!suspended && r === Rating.Again && isLeech(card, logs, baseOf(row))) { suspended = true; leech = true; }
   const st = stateOf(card, streak, logs.length, suspended);
   // last_variant drives rotation, so asking the original leaves it where it was.
   const lastVariant = variant ?? row?.last_variant ?? -1;
@@ -81,10 +86,10 @@ export function rate(course: string, question: string, doc: string, result: Resu
 
 // What the review page polls after answering: the schedule and the last log entry (result, note).
 export function cardStatus(course: string, question: string) {
-  const r = db.query("SELECT due, streak, state, log FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  const r = db.query("SELECT due, streak, state, log, suspended FROM cards WHERE course=? AND question=?").get(course, question) as any;
   if (!r) return null;
   const log = JSON.parse(r.log), last = log.at(-1) ?? null;
-  return { due: r.due, streak: r.streak, state: r.state, reviews: log.length, last: last && { result: last.result ?? null, note: last.note ?? null, confidence: last.confidence ?? null, variant: last.variant ?? null, review: last.review ?? null } };
+  return { due: r.due, streak: r.streak, state: r.state, suspended: !!r.suspended, reviews: log.length, last: last && { result: last.result ?? null, note: last.note ?? null, confidence: last.confidence ?? null, variant: last.variant ?? null, review: last.review ?? null } };
 }
 
 // --- learner profile writes ---------------------------------------------------
@@ -128,7 +133,7 @@ function recordLeech(course: string, question: string, doc: string) {
 // this session are written. `calibration` itself belongs to wrap-module; review data has its own key.
 export function updateProfiles(sessionStart: string) {
   const since = new Date(Date.now() - 30 * 864e5).toISOString();
-  const rows = db.query("SELECT course, question, card, log, suspended FROM cards").all() as any[];
+  const rows = db.query("SELECT course, question, card, log, suspended, leech_base FROM cards").all() as any[];
   const by: Record<string, { reviews: number; good: number; sureWrong: number; guessRight: number; leeches: string[]; touched: boolean }> = {};
   const all = { sureWrong: 0, guessRight: 0 };
   for (const r of rows) {
@@ -140,7 +145,7 @@ export function updateProfiles(sessionStart: string) {
       if (l.result === "wrong" && l.confidence === 3) { c.sureWrong++; all.sureWrong++; }
       if (l.result === "correct" && l.confidence === 1) { c.guessRight++; all.guessRight++; }
     }
-    if (r.suspended && isLeech(revive(JSON.parse(r.card)), log)) c.leeches.push(r.question);
+    if (r.suspended && isLeech(revive(JSON.parse(r.card)), log, baseOf(r))) c.leeches.push(r.question);
   }
   for (const [course, c] of Object.entries(by)) {
     if (!c.touched) continue;
@@ -154,11 +159,40 @@ export function updateProfiles(sessionStart: string) {
 }
 
 export function setSuspended(course: string, question: string, suspended: boolean) {
-  const row = db.query("SELECT card, streak, log FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  const row = db.query("SELECT card, streak, log, leech_base FROM cards WHERE course=? AND question=?").get(course, question) as any;
   if (!row) return;
-  const st = stateOf(revive(JSON.parse(row.card)), row.streak, JSON.parse(row.log).length, suspended);
-  db.run("UPDATE cards SET suspended=?, state=?, updated_at=? WHERE course=? AND question=?", [suspended ? 1 : 0, st, now(), course, question]);
+  const card = revive(JSON.parse(row.card)), log = JSON.parse(row.log);
+  const st = stateOf(card, row.streak, log.length, suspended);
+  // Unsuspending resets the leech count; the card comes back due now.
+  const base = suspended ? row.leech_base : JSON.stringify({ lapses: card.lapses, reviews: log.length });
+  const due = suspended ? null : now();
+  db.run("UPDATE cards SET suspended=?, state=?, leech_base=?, due=COALESCE(?, due), updated_at=? WHERE course=? AND question=?", [suspended ? 1 : 0, st, base, due, now(), course, question]);
   state.card(course, question);
+}
+export function deleteCard(course: string, question: string) {
+  db.run("DELETE FROM cards WHERE course=? AND question=?", [course, question]);
+  state.cardDeleted(course, question);
+}
+
+// Cards that need the learner's attention: suspended (by hand or as leeches), flagged grades, and
+// orphans whose question is gone from the course files.
+export async function cardList(kind: "suspended" | "flagged" | "orphaned", course?: string) {
+  const where = { suspended: "suspended=1", flagged: "flag IS NOT NULL", orphaned: "state='orphaned'" }[kind];
+  const rows = db.query(`SELECT * FROM cards WHERE ${where}${course ? " AND course=?" : ""} ORDER BY updated_at DESC`).all(...(course ? [course] : [])) as any[];
+  const courses = Object.fromEntries((await listCourses()).map((c) => [c.slug, c]));
+  const out = [];
+  for (const r of rows) {
+    const spec = await question(r.course, r.doc, r.question);
+    const c = courses[r.course], m = c?.modules.find((x) => x.id === r.module), file = r.doc.split("/").slice(2).join("/");
+    const log = JSON.parse(r.log), card = revive(JSON.parse(r.card));
+    out.push({
+      course: r.course, courseTitle: c?.title ?? r.course, question: r.question, doc: r.doc, module: r.module,
+      moduleTitle: m?.title ?? r.module ?? "", sectionTitle: file === "quiz.md" ? "Module test" : (m?.sections.find((s) => s.file === file)?.title ?? m?.extras.find((e) => e.file === file)?.title ?? file),
+      prompt: spec?.prompt ?? null, flag: r.flag ?? null, reviews: log.length, lapses: card.lapses,
+      leech: !!r.suspended && isLeech(card, log, baseOf(r)), updatedAt: r.updated_at,
+    });
+  }
+  return out;
 }
 export function setFlag(course: string, question: string, flag: string | null) {
   db.run("UPDATE cards SET flag=?, updated_at=? WHERE course=? AND question=?", [flag, now(), course, question]);
@@ -267,8 +301,8 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
   if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
   if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=? ORDER BY due`).all(...args, now()) as Row[];
-  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base} ORDER BY random() LIMIT ?`).all(cap) as Row[];
-  else if (mode === "weak") rows = await weakRows();
+  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? " AND course=?" : ""} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope] : []), cap) as Row[];
+  else if (mode === "weak") rows = (await weakRows()).filter((r) => !opts.scope || r.course === opts.scope);
   else rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} ORDER BY due`).all(...args) as Row[];
 
   let items = await resolve(rows.filter((r) => !excl.has(key(r))), mode === "cram");

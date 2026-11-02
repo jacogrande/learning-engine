@@ -22,17 +22,26 @@ function directives() {
 function Mermaid({ src }: { src: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Re-render when the theme changes: the picker, or the system scheme under "system".
+  const [theme, setTheme] = useState(0);
+  useEffect(() => {
+    const bump = () => setTheme((n) => n + 1);
+    const mq = matchMedia("(prefers-color-scheme: dark)");
+    addEventListener("themechange", bump); mq.addEventListener("change", bump);
+    return () => { removeEventListener("themechange", bump); mq.removeEventListener("change", bump); };
+  }, []);
   useEffect(() => {
     let live = true;
     import("mermaid").then(async ({ default: m }) => {
-      m.initialize({ startOnLoad: false, theme: document.documentElement.dataset.theme === "dark" || matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "neutral" });
+      const t = document.documentElement.dataset.theme;
+      m.initialize({ startOnLoad: false, theme: t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "neutral" });
       try {
         const { svg } = await m.render("m" + Math.random().toString(36).slice(2), src);
         if (live && ref.current) ref.current.innerHTML = svg;
       } catch (e) { if (live) setErr(String(e)); }
     });
     return () => { live = false; };
-  }, [src]);
+  }, [src, theme]);
   return err ? <pre className="block-error">{src}</pre> : <div className="mermaid" ref={ref} />;
 }
 

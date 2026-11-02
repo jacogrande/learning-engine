@@ -102,6 +102,20 @@ function Live({ spec }: { spec: QuizSpec }) {
         grade ? (saved?.note && saved.answer === v ? <p className="quiz-explain"><Inline>{saved.note}</Inline></p> : null)
               : spec.rubric ? <p className="quiz-explain"><Inline>{spec.rubric}</Inline></p> : null
       )}
+      {!form && saved?.history && saved.history.length > 0 && (
+        <details className="quiz-history">
+          <summary>Earlier answers ({saved.history.length})</summary>
+          <ol reversed>
+            {[...saved.history].reverse().map((h, i) => (
+              <li key={i}>
+                <span className="muted">{h.gradedAt ? new Date(h.gradedAt).toLocaleDateString() : "ungraded"}{h.result ? ` · ${h.result}` : ""}</span>
+                <blockquote>{spec.type === "mcq" ? spec.options?.[Number(h.answer)] ?? h.answer : h.answer}</blockquote>
+                {h.note && <p className="muted"><Inline>{h.note}</Inline></p>}
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
     </div>
   );
 }

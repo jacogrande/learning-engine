@@ -51,9 +51,18 @@ export function locate(root: HTMLElement, q: Quote): Range | null {
   return range;
 }
 
-export function paint(root: HTMLElement, quotes: Quote[]) {
+// Paint every quote that can still be found; returns the range for each id that was. A quote missing
+// from the result no longer matches the text (the section was rewritten since it was highlighted).
+export function paint(root: HTMLElement, quotes: (Quote & { id: string })[]): Record<string, Range> {
+  const found: Record<string, Range> = {};
+  for (const q of quotes) { const r = locate(root, q); if (r) found[q.id] = r; }
   const H = (globalThis as any).Highlight;
-  if (!H || !CSS.highlights) return;
-  const ranges = quotes.map((q) => locate(root, q)).filter((r): r is Range => !!r);
-  CSS.highlights.set("notes", new H(...ranges));
+  if (H && CSS.highlights) CSS.highlights.set("notes", new H(...Object.values(found)));
+  return found;
+}
+
+// Bring a range into view, a little below the top bar.
+export function scrollToRange(r: Range) {
+  const top = r.getBoundingClientRect().top + scrollY - 120;
+  scrollTo({ top: Math.max(0, top), behavior: "smooth" });
 }
