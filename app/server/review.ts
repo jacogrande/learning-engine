@@ -37,6 +37,18 @@ function scheduler() {
 }
 
 // Result + confidence → FSRS rating. A confident correct answer earns Easy; a guess only Good.
+// What a grader returns for one answer: the server's grade jobs and the vocab grader share it.
+export const RESULT = { type: "string", enum: ["correct", "partial", "wrong", "skipped"] };
+export const GRADE_SCHEMA = { type: "object", properties: { result: RESULT, note: { type: "string" } }, required: ["result", "note"] };
+export const isResult = (x: unknown): x is Result => typeof x === "string" && (RESULT.enum as string[]).includes(x);
+
+// A pass for retention: Good or better, or, for a vocab card, a correct answer (an effortful correct
+// recall is rated Hard, and it was still recalled).
+const passed = (l: any) => (l.difficulty != null ? l.result === "correct" : l.rating >= Rating.Good);
+
+// A course's cards, plus the vocab cards that are that course's own terms.
+const inCourse = () => ` AND (course=? OR (course='${VOCAB}' AND module=?))`;
+
 export function rating(result: Result, confidence?: number | null): Grade {
   if (result === "correct") return confidence === 3 ? Rating.Easy : Rating.Good;
   if (result === "partial") return Rating.Hard;
@@ -62,15 +74,16 @@ const isLeech = (card: Card, logs: any[], base: LeechBase = null) => {
 const baseOf = (row: any): LeechBase => (row?.leech_base ? JSON.parse(row.leech_base) : null);
 
 // Review answers live in the card's log (answer and grader note), not in the lesson's `answers` row.
-// `extra.rating` overrides the result+confidence mapping (vocab: the learner rates how hard the recall was).
-export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string; rating?: Grade; format?: string } = {}) {
+// `extra.rating` overrides the result+confidence mapping (vocab: the learner rates how hard the recall
+// was); `extra.log` adds fields to the log entry (vocab: format, sentence, difficulty).
+export function rate(course: string, question: string, doc: string, result: Result, confidence?: number | null, variant: number | null = null, extra: { answer?: string; note?: string; rating?: Grade; log?: Record<string, unknown> } = {}) {
   if (doc.startsWith("quizzes/")) return null;   // baseline: no card
   const row = db.query("SELECT card, streak, log, suspended, last_variant, leech_base, module FROM cards WHERE course=? AND question=?").get(course, question) as any;
   const prev: Card = row ? revive(JSON.parse(row.card)) : createEmptyCard(new Date());
   const r = extra.rating ?? rating(result, confidence);
   const { card, log } = scheduler().next(prev, new Date(), r);
   const streak = r === Rating.Again ? 0 : (row?.streak ?? 0) + 1;
-  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant, ...(extra.answer !== undefined ? { answer: extra.answer } : {}), ...(extra.note ? { note: extra.note } : {}), ...(extra.format ? { format: extra.format } : {}) }];
+  const logs = [...(row ? JSON.parse(row.log) : []), { ...log, result, confidence: confidence ?? null, variant, ...(extra.answer !== undefined ? { answer: extra.answer } : {}), ...(extra.note ? { note: extra.note } : {}), ...extra.log }];
   const module = course === VOCAB ? row?.module ?? null : /^modules\/([^/]+)\//.exec(doc)?.[1] ?? null;
   let suspended = !!row?.suspended;
   let leech = false;
@@ -139,10 +152,11 @@ export function updateProfiles(sessionStart: string) {
   const by: Record<string, { reviews: number; good: number; sureWrong: number; guessRight: number; leeches: string[]; touched: boolean }> = {};
   const all = { sureWrong: 0, guessRight: 0 };
   for (const r of rows) {
+    if (r.course === VOCAB) continue;   // no learner.md; and recall effort is not confidence
     const c = (by[r.course] ??= { reviews: 0, good: 0, sureWrong: 0, guessRight: 0, leeches: [], touched: false });
     const log = JSON.parse(r.log);
     for (const l of log) {
-      if (l.review >= since) { c.reviews++; if (l.rating >= Rating.Good) c.good++; }
+      if (l.review >= since) { c.reviews++; if (passed(l)) c.good++; }
       if (l.review >= sessionStart) c.touched = true;
       if (l.result === "wrong" && l.confidence === 3) { c.sureWrong++; all.sureWrong++; }
       if (l.result === "correct" && l.confidence === 1) { c.guessRight++; all.guessRight++; }
@@ -258,20 +272,20 @@ export async function question(course: string, doc: string, qid: string) {
 }
 
 type Row = { course: string; question: string; doc: string; module: string | null; due: string; streak: number; state: CardState; log: string; card: string; variants: string; last_variant: number };
-export type QueueItem = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: CardState; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: any; spec: any; vocab?: { format: string; sentence: string; form: string } };
+export type QueueItem = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: CardState; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: any; spec: any; vocab?: { format: string; sentence: string; form: string; reveal: unknown } };
 
 async function resolve(rows: Row[], prefer = false): Promise<QueueItem[]> {
   const courses = Object.fromEntries((await listCourses()).map((c) => [c.slug, c]));
   const items: QueueItem[] = [];
   for (const r of rows) {
     if (r.course === VOCAB) {
-      const log = JSON.parse(r.log), v = reviewSpec(r.question, log.length), last = log.at(-1);
+      const log = JSON.parse(r.log), v = reviewSpec(r.question, log), last = log.at(-1);
       if (!v) { db.run("UPDATE cards SET state='orphaned' WHERE course=? AND question=?", [r.course, r.question]); continue; }
       if (r.state === "orphaned") db.run("UPDATE cards SET state=? WHERE course=? AND question=?", [stateOf(revive(JSON.parse(r.card)), r.streak, log.length, false), r.course, r.question]);
       items.push({
         course: VOCAB, courseTitle: "Vocabulary", question: r.question, doc: r.doc, module: r.module, moduleTitle: "Vocabulary", sectionTitle: v.word,
         due: r.due, streak: r.streak, state: r.state, reviews: log.length, sureWrong: false, variant: null, variantCount: 0,
-        original: v.spec, spec: v.spec, vocab: { format: v.format, sentence: v.sentence, form: v.form },
+        original: v.spec, spec: v.spec, vocab: { format: v.format, sentence: v.sentence, form: v.form, reveal: v.reveal },
       });
       continue;
     }
@@ -317,12 +331,12 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   const base = "suspended=0 AND state<>'orphaned'";
   let rows: Row[]; const args: string[] = [];
   let scopeWhere = "";
-  if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = ` AND (course=? OR (course='${VOCAB}' AND module=?))`; args.push(opts.scope!, opts.scope!); }
+  if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = inCourse(); args.push(opts.scope!, opts.scope!); }
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
   if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
   if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=? ORDER BY due`).all(...args, now()) as Row[];
-  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? " AND course=?" : ""} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope] : []), cap) as Row[];
-  else if (mode === "weak") rows = (await weakRows()).filter((r) => !opts.scope || r.course === opts.scope);
+  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? inCourse() : ""} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope, opts.scope] : []), cap) as Row[];
+  else if (mode === "weak") rows = (await weakRows()).filter((r) => !opts.scope || r.course === opts.scope || (r.course === VOCAB && r.module === opts.scope));
   else rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} ORDER BY due`).all(...args) as Row[];
 
   let items = await resolve(rows.filter((r) => !excl.has(key(r))), mode === "cram");
@@ -330,7 +344,8 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   items = interleave(items).slice(0, cap);
   let topped = 0;
   if (mode === "daily" && items.length < 8 && !opts.exclude?.length) {
-    const fresh = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND state='new' AND due>? ORDER BY updated_at LIMIT ?`).all(...args, now(), 8 - items.length) as Row[];
+    // Not vocab cards: a word's first review waits for the day after it was met in Train.
+    const fresh = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND course<>'${VOCAB}' AND state='new' AND due>? ORDER BY updated_at LIMIT ?`).all(...args, now(), 8 - items.length) as Row[];
     const extra = await resolve(fresh.filter((r) => !items.some((i) => i.course === r.course && i.question === r.question)));
     topped = extra.length; items = [...items, ...extra];
   }
@@ -368,14 +383,14 @@ async function weakRows(): Promise<Row[]> {
 
 // Counts for the courses page and the review page header.
 export function summary(course?: string) {
-  const where = `suspended=0 AND state<>'orphaned'${course ? " AND course=?" : ""}`;
-  const args = course ? [course] : [];
+  const where = `suspended=0 AND state<>'orphaned'${course ? inCourse() : ""}`;
+  const args = course ? [course, course] : [];
   const by = (sql: string) => (db.query(sql).get(...args) as any).n;
   return {
     dueCount: by(`SELECT count(*) n FROM cards WHERE ${where} AND due<='${now()}'`),
     total: by(`SELECT count(*) n FROM cards WHERE ${where}`),
     learned: by(`SELECT count(*) n FROM cards WHERE ${where} AND state='learned'`),
-    suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? " AND course=?" : ""}`),
+    suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? inCourse() : ""}`),
     seeded: seededCount(course),
     streak: streak(),
     next: (db.query(`SELECT min(due) d FROM cards WHERE ${where} AND due>'${now()}'`).get(...args) as any).d,
@@ -501,8 +516,8 @@ export function stats() {
     for (const l of JSON.parse(r.log)) {
       if (!l.review) continue;
       const t = +new Date(l.review);
-      if (t >= since) { const d = l.review.slice(0, 10); const x = (perDay[d] ??= { reviews: 0, good: 0 }); x.reviews++; if (l.rating >= Rating.Good) x.good++; }
-      if (t >= sinceW) { const dt = new Date(t); dt.setUTCDate(dt.getUTCDate() - dt.getUTCDay()); const w = dt.toISOString().slice(0, 10); const x = (perWeek[w] ??= { reviews: 0, good: 0 }); x.reviews++; if (l.rating >= Rating.Good) x.good++; }
+      if (t >= since) { const d = l.review.slice(0, 10); const x = (perDay[d] ??= { reviews: 0, good: 0 }); x.reviews++; if (passed(l)) x.good++; }
+      if (t >= sinceW) { const dt = new Date(t); dt.setUTCDate(dt.getUTCDate() - dt.getUTCDay()); const w = dt.toISOString().slice(0, 10); const x = (perWeek[w] ??= { reviews: 0, good: 0 }); x.reviews++; if (passed(l)) x.good++; }
     }
   }
   const days = []; for (let i = 29; i >= 0; i--) { const d = new Date(Date.now() - i * 864e5).toISOString().slice(0, 10); days.push({ day: d, ...(perDay[d] ?? { reviews: 0, good: 0 }) }); }

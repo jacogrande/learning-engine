@@ -59,13 +59,13 @@ function Live({ spec }: { spec: QuizSpec }) {
   // Answers can arrive after the lesson renders; adopt them unless the learner has typed something new.
   useEffect(() => {
     if (!saved || (value !== "" && value !== saved.answer)) return;
-    setValue(saved.answer); setConfidence(saved.confidence ?? 0); setChecked(true);
-  }, [saved?.answer, saved?.result, saved?.note]);
+    setValue(saved.answer); setConfidence(saved.confidence ?? 0); setChecked(!saved.failed);
+  }, [saved?.answer, saved?.result, saved?.note, saved?.failed]);
   const v = form ? form.answers[spec.id] ?? "" : value;
   const set = (x: string) => { form ? form.set(spec.id, x) : setValue(x); setChecked(false); };
 
   const correct = spec.type === "mcq" && spec.answer != null && v === String(spec.answer);
-  const grading = checked && spec.type === "short" && grade && saved?.answer === v && !saved?.note;
+  const grading = checked && spec.type === "short" && grade && saved?.answer === v && !saved?.note && !saved?.result;
   const status: Result | null = checked ? (spec.type === "mcq" ? (correct ? "correct" : "wrong") : saved?.answer === v ? saved?.result ?? null : null) : null;
   const needConfidence = !!grade && !confidence;
   const sureAndWrong = !grade?.scale && status === "wrong" && (saved?.confidence ?? confidence) === 3;
@@ -96,7 +96,7 @@ function Live({ spec }: { spec: QuizSpec }) {
             </span>
           )}
           <button className="primary" onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? (grade?.scale ? "Rate how hard the recall was first" : "Pick how sure you are first") : undefined}>{grading ? "Grading…" : "Check"}</button>
-          {spec.type === "short" && grade && !checked && saved && <span className="muted">Edited since last check</span>}
+          {spec.type === "short" && grade && !checked && saved && (saved.failed ? <span className="muted" role="alert">{saved.note}</span> : <span className="muted">Edited since last check</span>)}
         </div>
       )}
       {sureAndWrong && <p className="quiz-explain hyper">You were sure. Errors held with confidence are the ones that stick once corrected — read the note below slowly.</p>}

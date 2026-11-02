@@ -62,6 +62,9 @@ export const state = {
     if (r) save(file("vocab", id), { ...r, contexts: JSON.parse(r.contexts), entry: r.entry ? JSON.parse(r.entry) : null, trainLog: JSON.parse(r.trainLog) });
   },
   vocabDeleted: (id: string) => remove(file("vocab", id)),
+  // Today's Train session in progress (null when finished): a refresh or another device resumes it.
+  trainSession: (s: unknown) => (s ? save(file("train-session"), s) : remove(file("train-session"))),
+  loadTrainSession: () => load(file("train-session")),
   settings: () => save(file("settings"), Object.fromEntries((db.query("SELECT key, value FROM settings").all() as any[]).map((r) => [r.key, JSON.parse(r.value)]))),
   session: (id: string) => {
     const r = db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(id);

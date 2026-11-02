@@ -11,7 +11,9 @@ import { describe, paint, scrollToRange, sentenceAround, type Quote } from "./se
 import { capture } from "./Vocab";
 import { Link, NotFound, Shell } from "./App";
 
-type Sel = Quote & { x: number; y: number };
+// `around` is the word's sentence, read when the selection is made: tapping a menu button on a touch
+// screen can clear the selection before the capture reads it.
+type Sel = Quote & { x: number; y: number; around: { word: string; sentence: string } | null };
 
 export function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file?: string }) {
   const { data: course, error: courseError } = useLive<Course>(`/api/courses/${slug}`);
@@ -75,7 +77,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     let t: ReturnType<typeof setTimeout> | undefined;
     const show = () => {
       const d = article.current && describe(article.current);
-      setSel(d ? { quote: d.quote, prefix: d.prefix, suffix: d.suffix, x: d.rect.left + d.rect.width / 2, y: d.rect.top } : null);
+      setSel(d ? { quote: d.quote, prefix: d.prefix, suffix: d.suffix, x: d.rect.left + d.rect.width / 2, y: d.rect.top, around: sentenceAround() } : null);
     };
     const onUp = () => setTimeout(show, 0);
     const onChange = () => { clearTimeout(t); t = setTimeout(show, 400); };
@@ -138,7 +140,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     if (!sel || !docPath) return;
     if (what === "vocab") {
       // A word the course itself defines in bold is a course term: it is reviewed with the course.
-      const s = sentenceAround(), word = (s?.word ?? sel.quote).trim();
+      const s = sentenceAround() ?? sel.around, word = (s?.word ?? sel.quote).trim();
       const esc = word.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const courseTerm = !!doc && new RegExp(`\\*\\*${esc}\\*\\*`, "i").test(doc.body);
       capture({ word, context: s?.sentence ?? "", course: slug, doc: docPath, title, courseTerm });

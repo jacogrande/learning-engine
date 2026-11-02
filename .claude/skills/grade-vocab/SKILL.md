@@ -9,7 +9,7 @@ The request is JSON: the `headword`, its `explanation`, the word it is often con
 
 Grade by format:
 
-- **recall** (fill the blank): `correct` for the expected word, another form of it, or an obvious misspelling of it. `partial` for a near-synonym that fits the sentence: it is not the word being learned. `wrong` for anything else, including the confusable word.
+- **recall** (fill the blank): `correct` for the expected word, another form of it, or an obvious misspelling of it. `partial` for a near-synonym that fits the sentence: it is not the word being learned, and it counts as a miss. `wrong` for anything else, including the confusable word.
 - **explain** (what the word means in the sentence): `correct` if the answer gives the core of the meaning in this sentence, in any words. `partial` if it is in the right area but too vague to tell the word from its neighbours ("something negative"), or gives only one of two essential parts. `wrong` if it gives another meaning, or the confusable word's meaning.
 - **use** (describe a situation the word fits): `correct` if the word is used in its right sense and the situation shows the meaning: someone who did not know the word could work it out. `partial` if the use is right but the sentence does not show the meaning ("The report was obdurate."). `wrong` if the word is misused.
 - **probe** (a question that turns on the meaning): `correct` if the answer reaches the model answer's conclusion for a reason that depends on what the word means. `partial` if the conclusion is right and the reason is missing or does not use the meaning. `wrong` if the conclusion is wrong.

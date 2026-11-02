@@ -523,8 +523,9 @@ article img, .mermaid svg { max-width: 100%; }
 /* ==========================================================================
    Vocabulary: capture, list, train
    ========================================================================== */
-.modal-scrim { position: fixed; inset: 0; z-index: var(--z-popover); background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding: 12vh var(--s-4) var(--s-4); }
-.modal { width: min(480px, 100%); background: var(--bg); border-radius: var(--radius-3); box-shadow: var(--shadow); padding: var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); }
+dialog.modal { width: min(480px, calc(100% - 2 * var(--s-4))); max-width: none; margin: 12vh auto auto; border: 0; padding: 0; color: inherit; background: var(--bg); border-radius: var(--radius-3); box-shadow: var(--shadow); }
+dialog.modal::backdrop { background: var(--scrim); }
+.modal > form { padding: var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); }
 .modal h2 { margin: 0; font-size: var(--fs-h2); }
 .modal label { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-ui); }
 .modal label.check { flex-direction: row; align-items: center; gap: var(--s-2); }

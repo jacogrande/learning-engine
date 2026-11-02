@@ -25,7 +25,8 @@ export function JobBar() {
     load(); const t = setInterval(load, 1500); return () => clearInterval(t);
   }, [open, job?.id, job?.activity]);
 
-  if (!job) return <Toasts />;
+  // Toasts stays mounted in the same place whether or not a job is showing, or its messages would reset.
+  if (!job) return <><Toasts /></>;
   const secs = job.startedAt ? Math.floor((Date.now() - +new Date(job.startedAt)) / 1000) : 0;
   const elapsed = `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}`;
 
@@ -58,7 +59,13 @@ function Toasts() {
     if (t.fade) setTimeout(() => setList((l) => l.filter((x) => x.id !== id)), 6000);
   };
   useEvent("notice", useCallback((ev: any) => {
-    const what = ev.kind === "drilldown" ? "Drill-down" : ev.kind === "vocab" ? "Vocab entry" : "Reading list";
+    // Vocab entries come often and are not urgent: a ready one fades; a failed one stays.
+    if (ev.kind === "vocab") {
+      if (ev.ok) push({ text: ev.merged ? `“${ev.title}” was already in your list; the new sentence was added to it.` : `Vocab entry ready: ${ev.title}`, to: ev.to, fade: true });
+      else push({ text: ev.kept ? `Rewriting “${ev.title}” failed; the old entry is kept.` : `The entry for “${ev.title}” could not be written. Try again from Vocabulary.`, to: ev.to, bad: true });
+      return;
+    }
+    const what = ev.kind === "drilldown" ? "Drill-down" : "Reading list";
     if (ev.ok) push({ text: `${what} ready: ${ev.title}`, to: ev.to });
     else push({ text: `${what} finished, but no new page turned up. Check the module's sidebar.`, bad: true });
   }, []));

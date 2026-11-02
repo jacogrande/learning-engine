@@ -7,14 +7,19 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
+import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const q = (req: Request, key: string) => new URL(req.url).searchParams.get(key) ?? "";
+// A vocab route: a valid word id, and 404 when the word (or what was asked of it) is not there.
+const word = async (req: Request & { params: { id: string } }, fn: (wid: string) => unknown) => {
+  if (!vocab.validId(req.params.id)) return json({ error: "not found" }, 404);
+  const r = await fn(req.params.id);
+  return r ? json(r) : json({ error: "not found" }, 404);
+};
 
-const RESULT = { type: "string", enum: ["correct", "partial", "wrong", "skipped"] };
 const ASSESSMENT_SCHEMA = {
   type: "object",
   properties: {
@@ -26,7 +31,6 @@ const ASSESSMENT_SCHEMA = {
   },
   required: ["level", "summary", "strengths", "gaps", "questions"],
 };
-const GRADE_SCHEMA = { type: "object", properties: { result: RESULT, note: { type: "string" } }, required: ["result", "note"] };
 
 // Latest attempt for a quiz, plus any unsent draft.
 async function quizState(course: string, quiz: string) {
@@ -242,6 +246,7 @@ migrate();
 sync.afterPull(() => { rebuild(); broadcast({ type: "content" }); });
 await sync.init();
 rebuild();
+vocab.resumePending();
 watchContent();
 
 Bun.serve({
@@ -351,7 +356,7 @@ Bun.serve({
         return json(row);
       },
     },
-    "/api/annotations/:id": { DELETE: (req) => { db.run("DELETE FROM annotations WHERE id=?", [req.params.id]); state.annotationDeleted(req.params.id); return json({ ok: true }); } },
+    "/api/annotations/:id": { DELETE: (req) => { if (db.run("DELETE FROM annotations WHERE id=?", [req.params.id]).changes) state.annotationDeleted(req.params.id); return json({ ok: true }); } },   // only a real id reaches a file path
 
     // --- notes: one markdown file per module, readable by Claude --------
     "/api/courses/:slug/notes/:module": {
@@ -522,23 +527,32 @@ Bun.serve({
         catch (e) { return json({ error: (e as Error).message }, 400); }
       },
     },
-    "/api/vocab/train": () => json(vocab.session()),
+    // Today's session, or the one in progress; ?fresh=1 starts over. PUT keeps the one in progress.
+    "/api/vocab/train": (req) => json(vocab.session(q(req, "fresh") === "1")),
+    "/api/vocab/train/session": { PUT: async (req) => { vocab.saveSession((await req.json()) as vocab.SavedSession | null); return json({ ok: true }); } },
+    // A grade by job id, for a page that missed its `vgrade` event.
+    "/api/vocab/grades/:job": (req) => json(vocab.gradeOf(req.params.job)),
     "/api/vocab/:id": {
-      GET: (req) => { const w = vocab.getWord(req.params.id); return w ? json(w) : json({ error: "not found" }, 404); },
-      PUT: async (req) => { const w = vocab.updateWord(req.params.id, await req.json()); return w ? json(w) : json({ error: "not found" }, 404); },
-      DELETE: (req) => { vocab.deleteWord(req.params.id); return json({ ok: true }); },
+      GET: (req) => word(req, (wid) => vocab.getWord(wid)),
+      PUT: async (req) => {
+        const body = await req.json();
+        try { return await word(req, (wid) => vocab.updateWord(wid, body)); } catch (e) { return json({ error: (e as Error).message }, 400); }
+      },
+      DELETE: (req) => word(req, (wid) => { if (!vocab.getWord(wid)) return null; vocab.deleteWord(wid); return { ok: true }; }),
     },
-    "/api/vocab/:id/regenerate": { POST: async (req) => { await vocab.enrich(req.params.id); return json({ ok: true }); } },
-    "/api/vocab/:id/meet": { POST: (req) => json(vocab.meet(req.params.id)) },
-    "/api/vocab/:id/finish": { POST: async (req) => json(vocab.finishWord(req.params.id, (await req.json()) as { correct: number; wrong: number })) },
-    "/api/vocab/:id/task": (req) => { const t = vocab.task(req.params.id, q(req, "stage") ? Number(q(req, "stage")) : undefined); return t ? json(t) : json({ error: "not ready" }, 404); },
-    // A graded attempt. Exact recalls and picks answer at once; the rest come back as a `vgrade` event.
+    "/api/vocab/:id/regenerate": { POST: async (req) => word(req, async (wid) => { if (!vocab.getWord(wid)) return null; await vocab.enrich(wid); return { ok: true }; }) },
+    "/api/vocab/:id/meet": { POST: (req) => word(req, (wid) => vocab.meet(wid)) },
+    "/api/vocab/:id/finish": { POST: async (req) => { const body = await req.json(); return word(req, (wid) => vocab.finishWord(wid, body)); } },
+    "/api/vocab/:id/task": (req) => word(req, (wid) => vocab.task(wid, q(req, "stage") ? Number(q(req, "stage")) : undefined)),
+    // A graded attempt. Exact recalls and picks answer at once; the rest come back as a `vgrade`
+    // event (a grade, or an error), and from /api/vocab/grades/:job.
     "/api/vocab/:id/answer": {
       POST: async (req) => {
-        const wid = req.params.id, a = (await req.json()) as vocab.Attempt;
+        const wid = req.params.id, a = vocab.parseAttempt(await req.json());
+        if (!vocab.validId(wid)) return json({ error: "not found" }, 404);
+        if (!a) return json({ error: "format, mode and answer required" }, 400);
         try {
-          const r = vocab.answer(wid, a, (g) => broadcast({ type: "vgrade", id: wid, mode: a.mode, ...g }));
-          return json(r);
+          return json(vocab.answer(wid, a, (g, job) => broadcast({ type: "vgrade", id: wid, mode: a.mode, job, ...g })));
         } catch (e) { return json({ error: (e as Error).message }, 400); }
       },
     },

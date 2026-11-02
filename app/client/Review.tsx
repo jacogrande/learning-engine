@@ -5,11 +5,12 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, put, useLive, type Answer, type Course } from "./api";
 import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell, navigate } from "./App";
-import { DIFFICULTY } from "./Vocab";
+import { Markdown } from "./Markdown";
+import { DIFFICULTY, VOCAB, inDialog } from "./Vocab";
 
-const VOCAB = "_vocab";
-
-type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: QuizSpec; spec: QuizSpec; vocab?: { format: string; sentence: string; form: string } };
+type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: QuizSpec; spec: QuizSpec; vocab?: { format: string; sentence: string; form: string; reveal: Reveal } };
+// The full answer to a vocab card, shown once it is graded.
+type Reveal = { sentence: string; headword: string; explanation: string; confusable: { word: string; difference: string } | null };
 type Summary = { dueCount: number; total: number; learned: number; suspended: number; seeded: number; streak: number; next: string | null };
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
@@ -80,10 +81,8 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
     const pending: Saved = { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null };
     setSaved((s) => ({ ...s, [key(it)]: pending }));
-    // A vocab card goes to the vocab grader with the learner's difficulty rating; then the card is polled like any short answer.
-    const sent = it.course === VOCAB
-      ? post(`/api/vocab/${it.question}/answer`, { format: it.vocab!.format, sentence: it.vocab!.sentence, form: it.vocab!.form, answer, difficulty: confidence, mode: "review" }).then(() => ({ review: null }))
-      : post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant });
+    if (it.course === VOCAB) return submitVocab(it, answer, confidence, pending);
+    const sent = post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant });
     sent.then((r) => {
       if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
@@ -97,6 +96,28 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     });
   }, [item]);
 
+  // A vocab card goes to the vocab grader with the learner's difficulty rating. An exact fill-in is
+  // rated at once; otherwise the grade is polled by job. A failed grade rates nothing and lets the
+  // learner check again.
+  const submitVocab = (it: Item, answer: string, difficulty: number, pending: Saved) => {
+    const k = key(it);
+    const fail = (why: string) => { clearInterval(timers.current[k]); tally.current.pending.delete(k); tally.current.reviewed--; setSaved((s) => ({ ...s, [k]: { ...pending, note: why, failed: true } })); };
+    post<{ job: string | null; result?: Answer["result"]; note?: string; review?: { due: string; leech?: boolean } | null }>(`/api/vocab/${it.question}/answer`, { format: it.vocab!.format, sentence: it.vocab!.sentence, form: it.vocab!.form, answer, difficulty, mode: "review" })
+      .then((r) => {
+        if (!r.job) return record(it, { ...pending, result: r.result ?? null, note: r.note || null, gradedAt: new Date().toISOString(), due: r.review?.due, leech: !!r.review?.leech });
+        let tries = 0;
+        clearInterval(timers.current[k]);
+        timers.current[k] = setInterval(() => get<any>(`/api/vocab/grades/${r.job}`).then((g) => {
+          if (g.error) return fail(`${g.error} Check again.`);
+          if (!g.result) { if (++tries > 120) fail("Grading is taking too long. Check again."); return; }
+          clearInterval(timers.current[k]);
+          get<CardStatus>(`/api/review/cards/${it.course}/${it.question}`).then(
+            (c) => record(it, { ...pending, result: g.result, note: g.note || null, gradedAt: new Date().toISOString(), due: c.due, leech: !!c.suspended }),
+            () => record(it, { ...pending, result: g.result, note: g.note || null, gradedAt: new Date().toISOString() }));
+        }, () => { if (++tries > 120) fail("The server cannot be reached. Check again."); }), 1500);
+      }, (e) => fail(typeof e === "number" ? `The answer was refused (${e}). Check again.` : "The server cannot be reached. Check again."));
+  };
+
   const next = () => { if (i + 1 >= (q?.items.length ?? 0)) syncSession(true); setI(i + 1); };
   const suspend = async () => { if (!item) return; await post(`/api/review/cards/${item.course}/${item.question}/suspend`, { suspended: true }); next(); };
   const flag = async () => { if (!item) return; const note = prompt("What was wrong with the grade? The grader sees this next time."); if (note) await post(`/api/review/cards/${item.course}/${item.question}/flag`, { note }); };
@@ -104,6 +125,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   // Keyboard: 1/2/3 confidence · Enter = Check, then Next.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
+      if (inDialog(e) || e.defaultPrevented) return;
       const tag = (e.target as HTMLElement).tagName;
       if (tag === "TEXTAREA" && e.key !== "Enter") return;
       if (tag === "INPUT" && (e.target as HTMLInputElement).type === "text") return;
@@ -159,7 +181,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   }
 
   const answered = saved[key(item)];
-  const graded = answered && (answered.result || answered.note);
+  const graded = answered && !answered.failed && (answered.result || answered.note);
   const due = answered?.due;
   const isVocab = item.course === VOCAB;
   const sectionLink = isVocab ? `/vocab#w-${item.question}` : `/c/${item.course}/m/${item.module}/${item.doc.split("/").slice(2).join("/")}`;
@@ -177,9 +199,16 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
       <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit, scale: isVocab ? DIFFICULTY : undefined }}>
         <Quiz key={`${key(item)}:${item.variant ?? "o"}`} spec={item.spec} />
       </QuizGrade>
+      {isVocab && graded && item.vocab && (
+        <div className="train-answer" aria-live="polite">
+          <Markdown body={`> ${item.vocab.reveal.sentence}`} />
+          <p><strong>{item.vocab.reveal.headword}</strong>: {item.vocab.reveal.explanation}</p>
+          {item.vocab.reveal.confusable && <p className="muted">Not {item.vocab.reveal.confusable.word}: {item.vocab.reveal.confusable.difference}</p>}
+        </div>
+      )}
       <div className="actions">
         <button className="primary review-next" disabled={!answered} onClick={next}>{i + 1 < q.items.length ? "Next →" : "Finish"}</button>
-        {answered && !graded && <span className="muted">Grading… you can move on.</span>}
+        {answered && !graded && !answered.failed && <span className="muted">Grading… you can move on.</span>}
         {graded && due && !answered.leech && <span className="muted">Next {relTime(due)}</span>}
         <span className="spacer" />
         {graded && <button className="link" onClick={flag}>Flag grade</button>}

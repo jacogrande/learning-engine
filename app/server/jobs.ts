@@ -56,8 +56,8 @@ for (const sig of ["SIGINT", "SIGTERM"] as const)
   process.on(sig, async () => {
     for (const lane of LANES) {
       const c = current[lane];
-      if (c) { killTree(c.child); finish(c.job, "interrupted"); c.job._opts.fail?.(c.job); }
-      for (const j of queues[lane]) { finish(j, "interrupted"); j._opts.fail?.(j); }
+      if (c) { killTree(c.child); finish(c.job, "interrupted"); settle(c.job, () => c.job._opts.fail?.(c.job)); }
+      for (const j of queues[lane]) { finish(j, "interrupted"); settle(j, () => j._opts.fail?.(j)); }
     }
     await Promise.race([flush(), new Promise((r) => setTimeout(r, 8000))]);   // push pending state, briefly
     process.exit(0);
@@ -88,11 +88,21 @@ export function cancel(jobId: string) {
   for (const lane of LANES) {
     if (current[lane]?.job.id === jobId) { cancelled.add(jobId); killTree(current[lane]!.child); }
     const i = queues[lane].findIndex((j) => j.id === jobId);
-    if (i >= 0) { const j = queues[lane].splice(i, 1)[0]; finish(j, "cancelled"); j._opts.fail?.(j); }
+    if (i >= 0) { const j = queues[lane].splice(i, 1)[0]; finish(j, "cancelled"); settle(j, () => j._opts.fail?.(j)); }
   }
 }
 
+// Jobs queued or running for one thing (a word's entry, say), so its owner can cancel them or tell
+// a live job from one lost with the last process.
+export const liveFor = (course: string, ref: string) => LANES.flatMap((l) => [...(current[l] ? [current[l]!.job] : []), ...queues[l]]).filter((j) => j.course === course && j.ref === ref).map(pub);
+export const cancelFor = (course: string, ref: string) => { for (const j of liveFor(course, ref)) cancel(j.id); };
+
 const pub = ({ _prompt, _opts, ...j }: any): Job => j;
+
+// A callback that throws must fail its own job, never the lane or the server.
+function settle(job: Queued, fn: (() => void) | undefined) {
+  try { fn?.(); } catch (e) { log(job.id, `! callback: ${(e as Error).message}`); console.warn(`job ${job.id} (${job.kind}) callback:`, (e as Error).message); }
+}
 
 function finish(job: Job, status: Job["status"], extra: Partial<Job> = {}) {
   Object.assign(job, extra, { status, finishedAt: now(), activity: undefined });
@@ -151,16 +161,16 @@ function pump(lane: Lane) {
   child.on("error", (e) => {   // e.g. `claude` not on PATH: fail the job, never the server
     log(job.id, `! spawn: ${e.message}`);
     current[lane] = null;
-    if (job.status === "running") { finish(job, "failed", { error: e.message }); o.fail?.(job); }
+    if (job.status === "running") { finish(job, "failed", { error: e.message }); settle(job, () => o.fail?.(job)); }
     pump(lane);
   });
   child.on("close", (code) => {
     if (!current[lane] || current[lane]!.job !== job) return;   // already handled by 'error'
     current[lane] = null;
     if (job.status === "running") {
-      if (cancelled.delete(job.id) || code === null) { finish(job, "cancelled"); o.fail?.(job); }
-      else if (code === 0 && !job.error) { finish(job, "done"); o.then?.(job.result, job); }
-      else { finish(job, "failed", { error: job.error ?? `exit ${code}` }); o.fail?.(job); }
+      if (cancelled.delete(job.id) || code === null) { finish(job, "cancelled"); settle(job, () => o.fail?.(job)); }
+      else if (code === 0 && !job.error) { finish(job, "done"); settle(job, () => o.then?.(job.result, job)); }
+      else { finish(job, "failed", { error: job.error ?? `exit ${code}` }); settle(job, () => o.fail?.(job)); }
     }
     pump(lane);
   });

@@ -52,7 +52,7 @@ function Words({ words }: { words: Word[] }) {
   return (
     <section className="nb-module">
       <div className="module-head"><h2>Words from this course</h2><Link to="/vocab/train" className="btn">Train</Link></div>
-      <ul className="nb-words">{words.map((w) => <li key={w.id}><Link to={`/vocab#w-${w.id}`}>{w.entry?.headword ?? w.word}</Link><Ladder stage={w.stage} /><span className="muted">{w.entry?.explanation ?? "entry being written"}</span></li>)}</ul>
+      <ul className="nb-words">{words.map((w) => <li key={w.id}><Link to={`/vocab#w-${w.id}`}>{w.entry?.headword ?? w.word}</Link><Ladder stage={w.stage} /><span className="muted">{w.entry?.explanation ?? (w.status === "failed" ? "entry failed; try again from Vocabulary" : w.writing ? "entry being written" : "entry interrupted; try again from Vocabulary")}</span></li>)}</ul>
     </section>
   );
 }
