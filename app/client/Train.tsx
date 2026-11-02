@@ -275,7 +275,7 @@ function Summary({ tally, queue, counts, criterion, again, resend }: { tally: Re
   useEffect(() => { for (const [wid, t] of words) if (t.unsent) resend(wid); }, []);
   const head = (wid: string) => queue.find((t): t is Task => isTask(t) && t.word === wid)?.headword ?? wid;
   const c = counts;
-  const why = !c?.total ? "No words yet. Select a word in a lesson and choose Vocab (or press V), or press Alt+V anywhere."
+  const why = !c?.total ? "No words yet. Select a word in a lesson and choose Vocab (or press V), or press Ctrl+V anywhere."
     : [
         c.pending ? `${c.pending} ${c.pending === 1 ? "entry is" : "entries are"} still being written; ${c.pending === 1 ? "it joins" : "they join"} Train when ready.` : "",
         c.failed ? `${c.failed} ${c.failed === 1 ? "entry" : "entries"} failed; try again from the Vocabulary page.` : "",

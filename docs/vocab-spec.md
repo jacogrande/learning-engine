@@ -27,7 +27,7 @@ Reading alone is slow: about 15% of unknown words are learned per encounter (Swa
 | Where | How |
 |---|---|
 | A lesson | Select text → **Vocab** in the selection menu, or press **V** while the menu is up. |
-| Anywhere | **Alt+V** opens an add box; a selection anywhere on the page fills the word and its sentence. **Add word** on the Vocabulary page does the same. |
+| Anywhere | **Ctrl+V**, outside a text field (where it stays paste), opens an add box; a selection anywhere on the page fills the word and its sentence. **Add word** on the Vocabulary page does the same. |
 
 Each capture records the word as selected, the sentence around it (from its paragraph, read when the selection is made), and the course, section and title it came from. A word already in the list, matched on the typed form or the entry's headword, gains the sentence as another context instead of a second entry. If the entry then shows two words share a headword (*obdurately* captured after *obdurate*), they merge: the one further up the ladder, else the older, is kept.
 

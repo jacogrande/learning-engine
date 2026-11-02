@@ -1,4 +1,4 @@
-// Vocabulary: capture from anywhere (Alt+V, or Vocab in a lesson's selection menu), and the list.
+// Vocabulary: capture from anywhere (Ctrl+V, or Vocab in a lesson's selection menu), and the list.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { del, post, put, useEvent, useLive } from "./api";
 import { Markdown } from "./Markdown";
@@ -78,13 +78,17 @@ function here(): { course: string | null; doc: string | null; title: string | nu
   return { course: m?.[1] ?? null, doc: m?.[2] && m[3] && m[3].endsWith(".md") ? `modules/${m[2]}/${m[3]}` : null, title };
 }
 
-// Alt+V anywhere: add a word. A selection, if there is one, fills the word and its sentence. Also
+// Ctrl+V anywhere outside a text field: add a word. In a field it stays paste. A selection, if there is one, fills the word and its sentence. Also
 // sends captures kept while offline, on load and whenever the connection comes back.
 export function VocabCapture() {
   const [open, setOpen] = useState<null | { word: string; context: string }>(null);
   useEffect(() => {
     const show = () => { const s = sentenceAround(); setOpen({ word: s?.word ?? "", context: s?.sentence ?? "" }); };
-    const onKey = (e: KeyboardEvent) => { if (e.altKey && !e.ctrlKey && !e.metaKey && e.code === "KeyV") { e.preventDefault(); show(); } };
+    const onKey = (e: KeyboardEvent) => {
+      const el = e.target as HTMLElement | null;
+      const editable = !!el && (/^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) || el.isContentEditable);
+      if (e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey && e.code === "KeyV" && !editable && !inDialog(e)) { e.preventDefault(); show(); }
+    };
     addEventListener("keydown", onKey); addEventListener("vocab-add", show); addEventListener("online", flushOutbox);
     flushOutbox();
     return () => { removeEventListener("keydown", onKey); removeEventListener("vocab-add", show); removeEventListener("online", flushOutbox); };
@@ -124,7 +128,7 @@ function AddForm({ initial, onClose }: { initial: { word: string; context: strin
         <label>Word or phrase<input className="field" autoFocus value={word} onChange={(e) => setWord(e.target.value)} placeholder="e.g. obdurate" /></label>
         <label>Where you met it <span className="muted">(optional; the sentence becomes its first example)</span><textarea className="field" rows={3} value={context} onChange={(e) => setContext(e.target.value)} /></label>
         {src.course && <label className="check"><input type="checkbox" checked={term} onChange={(e) => setTerm(e.target.checked)} /> A term of this course <span className="muted">(reviewed with the course's own cards)</span></label>}
-        <div className="actions"><button type="submit" className="primary" disabled={!word.trim() || busy}>{busy ? "Adding…" : "Add"}</button><button type="button" onClick={onClose}>Cancel</button><span className="muted">Alt+V from any page</span></div>
+        <div className="actions"><button type="submit" className="primary" disabled={!word.trim() || busy}>{busy ? "Adding…" : "Add"}</button><button type="button" onClick={onClose}>Cancel</button><span className="muted">Ctrl+V from any page</span></div>
       </form>
     </dialog>
   );
@@ -172,7 +176,7 @@ export function VocabPage() {
       </div>
       <p className="meta">{c.total} words · {c.new} new · {c.climbing} climbing · {c.through} through the ladder{c.pending ? ` · ${c.pending} being written` : ""}{c.failed ? ` · ${c.failed} failed` : ""}{c.trainedToday ? ` · ${c.trainedToday} trained today` : ""}</p>
       {c.total === 0 ? (
-        <p className="muted empty">No words yet. Select a word in a lesson and choose Vocab (or press V), or press Alt+V on any page.</p>
+        <p className="muted empty">No words yet. Select a word in a lesson and choose Vocab (or press V), or press Ctrl+V on any page.</p>
       ) : <>
         <div className="vocab-tools">
           <input className="field" type="search" aria-label="Search words" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search words, meanings, sentences" />
