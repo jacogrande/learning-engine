@@ -65,7 +65,7 @@ const notesPath = (slug: string, mod: string) => join(NOTES_DIR, slug, `${mod}.m
 const quoteBlock = (s: string) => s.split("\n").map((l) => `> ${l}`).join("\n");
 
 // Invariants for every tutor turn, including resumed ones, where the skill body is far back in context.
-const TUTOR_SYSTEM = `Your reply is shown to the learner verbatim. Produce exactly one reply and nothing else: no text before or between tool calls, no "I'll read…", no headings, no bullet lists unless listing is the point. Two to six sentences. At most one question per reply. Hold an answer back until the learner has made a real attempt; after that, give it straight. If they say something wrong, say so and why. Each learner message starts with its exchange number.`;
+const TUTOR_SYSTEM = `Your reply is shown to the learner verbatim. Produce exactly one reply and nothing else: no text before or between tool calls, no "I'll read…", no headings, no bullet lists unless listing is the point. Two to six sentences, laid out to be read in a narrow pane: short paragraphs of one to three sentences with a blank line between them (the direct answer first, then the mechanism or example), an example sentence on its own line as a \`>\` quote, and the question, if any, as its own last paragraph. Bold a term where you define it. At most one question per reply. Hold an answer back until the learner has made a real attempt; after that, give it straight. If they say something wrong, say so and why. Each learner message starts with its exchange number.`;
 
 // One chat turn: the first uses the /chat or /socratic skill with context; later turns resume the session.
 function sendChat(chat: any, content: string, record = true) {

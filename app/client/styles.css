@@ -424,14 +424,17 @@ ul.block-note { padding-left: var(--s-6); }
 .chat-list li { padding: var(--s-2) 0; border-top: var(--hairline) solid var(--faint); }
 .chat-list .link { display: inline; font-size: var(--fs-ui); color: var(--fg); white-space: normal; text-align: left; }
 .chat-thread { display: flex; flex-direction: column; gap: var(--s-3); flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-right: var(--s-1); }
-.msg { font-size: var(--fs-ui); line-height: var(--lh-small); }
+/* Chat reads like the lesson, a step smaller: replies are prose to study, not interface text. */
+.msg { font-size: 16px; line-height: 1.6; }
+.msg-assistant blockquote { margin: 0 0 var(--s-2); padding-left: var(--s-3); border-left: var(--rule) solid var(--faint); color: var(--muted); }
+.msg-assistant ul, .msg-assistant ol { margin: 0 0 var(--s-2); padding-left: var(--s-5); }
 .msg-user { align-self: flex-end; max-width: 90%; padding: var(--s-2) var(--s-3); background: var(--code); border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3); white-space: pre-wrap; }
-.msg-assistant p { margin: 0 0 var(--s-2); } .msg-assistant > :last-child { margin-bottom: 0; }
+.msg-assistant p { margin: 0 0 var(--s-3); } .msg-assistant > :last-child { margin-bottom: 0; }
 .chat-context { margin: 0; padding-left: var(--s-2); border-left: var(--rule) solid var(--accent); color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .chat-action { margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3); border-left: var(--rule) solid var(--accent-fill); background: var(--hover); font-size: var(--fs-small); }
 .chat-action.is-bad { border-left-color: var(--bad); }
 .composer { display: flex; flex-direction: column; gap: var(--s-2); flex: none; }
-.composer textarea { font-size: var(--fs-ui); resize: none; }
+.composer textarea { font-size: 16px; line-height: 1.5; resize: none; }
 .composer button { align-self: flex-end; }
 
 /* ==========================================================================
