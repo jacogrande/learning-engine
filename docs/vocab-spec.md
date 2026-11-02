@@ -99,6 +99,15 @@ Correctness is checked, never self-reported; the self-rating only separates corr
 
 Meet is the only rung that is study; every other task is retrieval before the answer is shown.
 
+### Family questions
+
+Occasional extra practice on a word's family, outside the ladder: they never count toward climbing or dropping and never touch review. At most three a session, after the main pass, and one a week per word.
+
+- **Work out a family member** (from the Recall rung on): the word and its explanation, then "what does *bereavement* mean?" for a member whose meaning follows from the word's. No sentence, so the meaning is reasoned from the word and the ending. Members whose meaning has drifted are not asked this way: they cannot be worked out. Graded by Claude against the member's sense (`family` in `/grade-vocab`).
+- **Pick from the family** (once through the ladder): a member's example sentence with the blank, and the word and its family as the choices, so the forms whose meanings have split (*bereft*, *bereaved*) are told apart. The blank always takes the member's own form, so grammar gives nothing away.
+
+The full answer follows each: the member, how it relates to the word, its sense and an example.
+
 ### Why these rules
 
 - **Three correct, then come back another day**, not one correct and done. Dropping a word after its first correct recall is the losing condition in Karpicke & Roediger (2008); three initial correct recalls followed by spaced relearning sessions is the recommendation from Rawson & Dunlosky (2011), and relearning erases most differences in the first session (Vaughn et al. 2016).

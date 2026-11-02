@@ -21,9 +21,11 @@ export type Entry = {
 };
 // `url`: the web page a word was captured from (the browser extension); course words have `doc` instead.
 export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };
-export type Format = "meet" | "pick" | "recall" | "explain" | "use";
+// The ladder's formats, and two occasional family questions that never move the ladder: choosing
+// which family member fits a sentence, and working out what a member means from the word.
+export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain";
 // One line of a word's Train log: an attempt (with the sentence or probe asked), meet, or a ladder move.
-export type TrainLog = { at: string; format: Format | "climb" | "drop"; result?: string; answer?: string; note?: string; sentence?: string; probe?: string; stage?: number };
+export type TrainLog = { at: string; format: Format | "climb" | "drop"; result?: string; answer?: string; note?: string; sentence?: string; probe?: string; kin?: string; stage?: number };
 export type VocabRow = {
   id: string; word: string; contexts: Context[]; course_term: string | null; entry: Entry | null; status: "pending" | "ready" | "failed";
   stage: number; trainLog: TrainLog[]; trained_at: string | null; created_at: string; updated_at: string;

@@ -78,6 +78,7 @@ export function TrainPage() {
 
   const endTurn = async (wid: string) => {
     const t = tally.current[wid];
+    if (t.done && !t.unsent) return;   // a word's turn ends once: a second finish could drop it again
     t.done = true; bump((n) => n + 1);
     try { const r = await post<{ stage: number; event: string | null }>(`/api/vocab/${wid}/finish`, { correct: t.correct, wrong: t.wrong }); t.stage = r.stage; t.event = r.event; t.unsent = false; }
     catch { t.unsent = true; }
@@ -100,6 +101,8 @@ export function TrainPage() {
     later(task.word, i); setI(i + 1);
   };
   const onGraded = (task: Task, g: Grade) => {
+    setPending(null);
+    if (task.bonus) return;   // a family question: logged by the server, outside the ladder
     const t = tally.current[task.word];
     t.attempts++;
     if (g.result === "correct") t.correct++; else t.wrong++;
@@ -109,7 +112,7 @@ export function TrainPage() {
     else later(task.word, i);
   };
   // Leave a task whose grade could not be had, without counting it.
-  const pass = () => { setPending(null); const t = isTask(slot) ? tally.current[slot.word] : null; if (t && !queue.slice(i + 1).some((s) => s.word === slot!.word)) endTurn(slot!.word); setI(i + 1); };
+  const pass = () => { setPending(null); const t = isTask(slot) && !slot.bonus ? tally.current[slot.word] : null; if (t && !queue.slice(i + 1).some((s) => s.word === slot!.word)) endTurn(slot!.word); setI(i + 1); };
 
   if (!slot) return <Shell crumbs={crumbs} className="page train"><Summary tally={tally.current} queue={queue} counts={counts} criterion={criterion} again={() => load(true)} resend={endTurn} /></Shell>;
   const words = Object.keys(tally.current), done = words.filter((w) => tally.current[w].done).length;
@@ -117,7 +120,7 @@ export function TrainPage() {
     <Shell crumbs={crumbs} className="page train">
       <div className="train-progress" role="progressbar" aria-label="Words done" aria-valuemin={0} aria-valuemax={words.length} aria-valuenow={done}><span style={{ width: `${(100 * done) / Math.max(1, words.length)}%` }} /></div>
       {!isTask(slot) ? <p className="meta">Loading the next task…</p> : <>
-        <p className="meta">{done} of {words.length} words done · {slot.format === "meet" ? "new word" : `${RUNGS[Math.min(slot.stage, DONE - 1)].toLowerCase()}${slot.stage >= DONE ? " · upkeep" : ""}`}</p>
+        <p className="meta">{done} of {words.length} words done · {slot.format === "meet" ? "new word" : slot.bonus ? "family · extra practice" : `${RUNGS[Math.min(slot.stage, DONE - 1)].toLowerCase()}${slot.stage >= DONE ? " · upkeep" : ""}`}</p>
         {slot.format === "meet"
           ? <Meet key={i} task={slot} onDone={() => onMet(slot)} />
           : <Attempt key={i} i={i} task={slot} pending={pending?.i === i ? pending : null} onSent={(job) => setPending(job ? { i, job } : null)} onGraded={(g) => onGraded(slot, g)} onPass={pass} onNext={() => setI(i + 1)} />}
@@ -186,14 +189,15 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
     return () => clearInterval(t);
   }, [phase]);
 
-  const answer = task.format === "pick" ? (picked !== null ? task.options![picked] : "") : value;
+  const choice = task.format === "pick" || task.format === "kin-pick";
+  const answer = choice ? (picked !== null ? task.options![picked] : "") : value;
   const ready = !!answer.trim() && phase === "answer";
   const send = async (text: string) => {
     setPhase("grading"); setError(null);
-    const result = task.format === "pick" ? (picked === task.answer ? "correct" : "wrong") : undefined;
+    const result = choice ? (picked === task.answer ? "correct" : "wrong") : undefined;
     try {
       const r = await post<{ job: string | null; result?: Grade["result"]; note?: string }>(`/api/vocab/${task.word}/answer`, {
-        format: task.format, sentence: task.sentence, form: task.form, answer: text, mode: "train", result, probe: task.probe,
+        format: task.format, sentence: task.sentence, form: task.form, answer: text, mode: "train", result, probe: task.probe, kin: task.kin ? { word: task.kin.word, sense: task.kin.sense } : undefined,
       });
       if (r.job) { job.current = r.job; onSent(r.job); }
       else if (r.result) land({ result: r.result, note: r.note ?? "" });
@@ -206,7 +210,7 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
     const on = (e: KeyboardEvent) => {
       if (inDialog(e) || e.defaultPrevented) return;
       const el = e.target as HTMLElement, typing = el.tagName === "TEXTAREA" || (el.tagName === "INPUT" && (el as HTMLInputElement).type === "text");
-      if (!typing && task.format === "pick" && phase === "answer" && /^[1-9]$/.test(e.key) && Number(e.key) <= task.options!.length) { setPicked(Number(e.key) - 1); e.preventDefault(); }
+      if (!typing && choice && phase === "answer" && /^[1-9]$/.test(e.key) && Number(e.key) <= task.options!.length) { setPicked(Number(e.key) - 1); e.preventDefault(); }
       if (e.key === "Enter" && !e.shiftKey) {
         if (phase === "answer" && ready) { e.preventDefault(); check(); }
         else if (phase === "feedback") { e.preventDefault(); onNext(); }
@@ -218,9 +222,9 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
   const right = grade?.result === "correct";
   return (
     <article className={`train-card ${grade ? `is-${grade.result}` : ""}`}>
-      <p className="kicker">{task.format === "pick" ? "Pick the word" : task.format === "recall" ? "Recall the word" : task.format === "explain" ? "Recall the meaning" : "Use it"}</p>
+      <p className="kicker">{task.format === "pick" ? "Pick the word" : task.format === "recall" ? "Recall the word" : task.format === "explain" ? "Recall the meaning" : task.format === "kin-pick" ? "Pick from the family" : task.format === "kin-explain" ? "Work out a family member" : "Use it"}</p>
       <div className="train-prompt" id={`prompt-${i}`}><Markdown body={task.prompt} /></div>
-      {task.format === "pick" ? (
+      {choice ? (
         <div className="quiz-options" role="radiogroup" aria-labelledby={`prompt-${i}`}>
           {task.options!.map((o, k) => (
             <label key={o} className={phase === "feedback" ? (k === task.answer ? "is-answer" : k === picked ? "is-wrong" : "") : ""}>
@@ -253,18 +257,22 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
             <p><span className="quiz-status">{grade!.result}</span> {grade!.note}</p>
             {/* The full answer, every time: after a miss it is what does the teaching. */}
             <div className="train-answer">
-              {task.format === "pick" || task.format === "recall"
+              {task.format === "pick" || task.format === "recall" || task.format === "kin-pick"
                 ? <Markdown body={`> ${bold(task.sentence, task.form)}`} />
                 : task.probe ? <p>{task.probe.answer}</p> : null}
-              <p><strong>{task.headword}</strong>: {task.entry.explanation}</p>
+              {/* A family question's answer is the member: its meaning, how it relates, an example. */}
+              {task.kin ? <>
+                <p><strong>{task.kin.word}</strong> <span className="muted">{task.kin.relation}</span>: {task.kin.sense}</p>
+                {task.format === "kin-explain" && task.kin.example && <Markdown body={`> ${bold(task.kin.example.sentence, task.kin.example.form)}`} />}
+              </> : <p><strong>{task.headword}</strong>: {task.entry.explanation}</p>}
               {/* Near-neighbours are contrasted once the word is known, from the meaning rung on. */}
               {task.stage >= 3 && task.entry.confusable && <p className="muted">Not {task.entry.confusable.word}: {task.entry.confusable.difference}</p>}
             </div>
-            <div className="actions"><button className="primary" autoFocus onClick={onNext}>Next →</button><span className="muted">{right ? "" : "It comes back in a few cards."} Enter</span></div>
+            <div className="actions"><button className="primary" autoFocus onClick={onNext}>Next →</button><span className="muted">{right || task.bonus ? "" : "It comes back in a few cards."} Enter</span></div>
           </div>
         )}
       </div>
-      <p className="meta keys">{task.format === "pick" ? "1–4 choose · " : ""}Enter check / next{task.format !== "recall" && task.format !== "pick" ? " · Shift+Enter new line" : ""}</p>
+      <p className="meta keys">{choice ? `1–${task.options!.length} choose · ` : ""}Enter check / next{task.format !== "recall" && !choice ? " · Shift+Enter new line" : ""}</p>
     </article>
   );
 }

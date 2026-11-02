@@ -16,11 +16,12 @@ export type Word = {
   card: { due: string; state: string; streak: number; suspended: boolean; reviews: number } | null;
 };
 export type Counts = { total: number; pending: number; failed: number; new: number; climbing: number; through: number; trainedToday: number; trainable: number; reviewFirst: number; held: number };
-export type Format = "meet" | "pick" | "recall" | "explain" | "use";
+export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain";
 // One Train task, as /api/vocab/train and /api/vocab/:id/task send it.
 export type Task = {
   word: string; format: Format; stage: number; headword: string; entry: Entry; contexts: Context[]; courseTerm: string | null;
   sentence: string; form: string; anchor: Example; prompt: string; hint?: string; options?: string[]; answer?: number; probe?: Probe;
+  bonus?: boolean; kin?: Kin;   // a family question: extra practice, never counted toward the ladder
 };
 export const VOCAB = "_vocab";   // the pseudo-course vocab cards live under
 export const RUNGS = ["Meet", "Pick", "Recall", "Explain", "Use"];

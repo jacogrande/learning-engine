@@ -19,7 +19,7 @@ export { VOCAB };
 // Train ladder: each stage is the format asked next. 5 = through the ladder; kept up by review.
 export const LADDER: Format[] = ["meet", "pick", "recall", "explain", "use"];
 export const DONE = LADDER.length;
-const FORMATS: Format[] = [...LADDER];
+const FORMATS: Format[] = [...LADDER, "kin-pick", "kin-explain"];
 const UPKEEP: Format[] = ["recall", "explain", "use"];
 const LOG_MAX = 80;
 
@@ -287,7 +287,7 @@ export function vocabRating(result: Result, difficulty: number, format: Format):
   return difficulty >= 3 ? Rating.Easy : difficulty === 2 ? Rating.Good : Rating.Hard;
 }
 
-export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe };
+export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe; kin?: { word: string; sense: string } };
 type Graded = { result: Result; note: string };
 
 export function parseAttempt(b: any): Attempt | null {
@@ -297,6 +297,7 @@ export function parseAttempt(b: any): Attempt | null {
     difficulty: Number.isInteger(b.difficulty) ? Math.min(3, Math.max(0, b.difficulty)) : 0,
     result: isResult(b.result) ? b.result : undefined,
     probe: b.probe && typeof b.probe.question === "string" && typeof b.probe.answer === "string" ? { question: b.probe.question, answer: b.probe.answer } : undefined,
+    kin: b.kin && typeof b.kin.word === "string" && typeof b.kin.sense === "string" ? { word: b.kin.word.slice(0, 40), sense: b.kin.sense.slice(0, 500) } : undefined,
   };
 }
 
@@ -324,15 +325,15 @@ export function answer(wid: string, a: Attempt, done: (g: Graded | { error: stri
   if (!w?.entry) throw new Error("word not ready");
   const entry = w.entry;
   const at_once = (g: Graded) => { if (a.mode === "review") pendingReview.delete(wid); const review = record(wid, a, g); done(g, null); return { job: null, ...g, review }; };
-  if (a.format === "pick" && a.result) return at_once({ result: a.result, note: "" });
+  if ((a.format === "pick" || a.format === "kin-pick") && a.result) return at_once({ result: a.result, note: "" });
   if (!a.answer.trim()) return at_once({ result: "skipped", note: "" });
   if (a.format === "recall" && exact(a.answer, a.form, entry)) return at_once({ result: "correct", note: "" });
   const flag = (db.query("SELECT flag FROM cards WHERE course=? AND question=?").get(VOCAB, wid) as any)?.flag;
   const current = () => a.mode !== "review" || pendingReview.get(wid) === job.id;
   const job = enqueue(VOCAB, "grade", `/grade-vocab\n\n${JSON.stringify({
     headword: entry.headword, pos: entry.pos, explanation: entry.explanation, confusable: entry.confusable,
-    format: a.probe ? "probe" : a.format, sentence: a.probe ? undefined : a.sentence, expected: a.format === "recall" ? a.form : undefined,
-    question: a.probe?.question, model_answer: a.probe?.answer, answer: a.answer,
+    format: a.probe ? "probe" : a.format === "kin-explain" ? "family" : a.format, sentence: a.probe || a.kin ? undefined : a.sentence, expected: a.format === "recall" ? a.form : undefined,
+    question: a.probe?.question, word: a.kin?.word, model_answer: a.probe?.answer ?? a.kin?.sense, answer: a.answer,
   }, null, 2)}${flag ? `\n\nThe learner flagged an earlier grade on this word as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
     ref: wid, schema: GRADE_SCHEMA,
     then: (g: any) => {
@@ -366,7 +367,7 @@ function record(wid: string, a: Attempt, g: Graded) {
     syncProfiles(); refreshTests(wid);
     return r;
   }
-  const line: TrainLog = { at: now(), format: a.format, result: g.result, answer: a.answer, note: g.note || undefined, sentence: a.probe ? undefined : a.sentence || undefined, probe: a.probe?.question };
+  const line: TrainLog = { at: now(), format: a.format, result: g.result, answer: a.answer, note: g.note || undefined, sentence: a.probe || a.format === "kin-explain" ? undefined : a.sentence || undefined, probe: a.probe?.question, kin: a.kin?.word };
   save(wid, { train_log: JSON.stringify([...w.trainLog, line].slice(-LOG_MAX)), trained_at: now() });
   refreshTests(wid);
   return null;
@@ -401,6 +402,7 @@ export function finishWord(wid: string, s: { correct: number; wrong: number }) {
 export type Task = {
   word: string; format: Format; stage: number; headword: string; entry: Entry; contexts: Context[]; courseTerm: string | null;
   sentence: string; form: string; anchor: Example; prompt: string; hint?: string; options?: string[]; answer?: number; probe?: Probe;
+  bonus?: boolean; kin?: Kin;   // a family question: extra practice, never counted toward the ladder
 };
 
 const shuffle = <T,>(xs: T[]) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -414,7 +416,7 @@ export function task(wid: string, stage?: number): Task | null {
   const e = w.entry;
   const s = Math.max(0, Math.min(DONE, stage ?? w.stage));
   // Upkeep rotates recall → explain → use from the last format asked.
-  const lastFormat = w.trainLog.filter((l) => l.result).at(-1)?.format as Format | undefined;
+  const lastFormat = w.trainLog.filter((l) => l.result && UPKEEP.includes(l.format as Format)).at(-1)?.format as Format | undefined;
   const format: Format = s >= DONE ? UPKEEP[(UPKEEP.indexOf(lastFormat ?? "use") + 1) % UPKEEP.length] : LADDER[s];
   const pool = testPool(w), last = lastAsked(w, cardLog(wid));
   const ex = freshest(pool, last);
@@ -476,6 +478,41 @@ function pick(limit = 12) {
   return { picked, reviewFirst: rows.filter((r) => r.stage > 0 && notToday(r) && dueToday(r)).length, held };
 }
 
+// Family questions: occasional extra practice on a word's family, outside the ladder. At most three
+// a session and one a week per word.
+// - kin-explain, from the Recall rung on (the word is known a little): the word and its explanation, then
+//   "what does <member> mean?", for a member whose meaning follows from the word's (not one that has
+//   drifted, which cannot be worked out). No sentence, so the meaning is reasoned from the word.
+// - kin-pick, once through the ladder: a member's example sentence with a blank, and the family as the
+//   choices, so the forms whose meanings have split are told apart.
+const KIN_PER_SESSION = 3, KIN_GAP_DAYS = 7;
+function kinTask(wid: string): Task | null {
+  const w = wordRow(wid);
+  const e = w?.entry, family = e?.family ?? [];
+  if (!w || !e || w.stage < 2 || !family.length) return null;
+  const asked = w.trainLog.filter((l) => l.format === "kin-pick" || l.format === "kin-explain");
+  const last = asked.at(-1)?.at;
+  if (last && Date.now() - +new Date(last) < KIN_GAP_DAYS * 864e5) return null;
+  const when = (word: string) => asked.filter((l) => l.kin === word).at(-1)?.at ?? "";
+  const leastAsked = <T extends { word: string }>(xs: T[]) => [...xs].sort((a, b) => (when(a.word) < when(b.word) ? -1 : 1))[0];
+  const base = { word: wid, stage: w.stage, headword: e.headword, entry: e, contexts: w.contexts, courseTerm: w.course_term, anchor: anchorOf(w), bonus: true };
+  if (w.stage >= DONE) {
+    // A member's example whose blank takes the member's own form, so the choices (all base words) cannot
+    // be told apart by grammar; the headword is one of the choices.
+    const cands = family.filter((k) => k.example && norm(k.example.form) === norm(k.word));
+    const options = shuffle([...new Set([e.headword, ...family.map((k) => k.word)])]).slice(0, 5);
+    const k = leastAsked(cands.filter((c) => options.includes(c.word)));
+    if (k && options.length >= 3) {
+      return { ...base, format: "kin-pick", sentence: k.example!.sentence, form: k.example!.form, kin: k,
+        prompt: `Which word from the **${e.headword}** family fits?\n\n> ${blank(k.example!)}`, options, answer: options.indexOf(k.word) };
+    }
+  }
+  const k = leastAsked(family.filter((m) => !m.separate));
+  if (!k) return null;
+  return { ...base, format: "kin-explain", sentence: "", form: "", kin: k,
+    prompt: `You know **${e.headword}**: ${e.explanation}\n\n**${k.word}** (${k.pos}) is in its family. What does it mean?` };
+}
+
 // A session in progress, kept on the server so a refresh, another tab or a dropped connection picks
 // it up where it was. The client owns its shape; it only has to be today's and unfinished.
 export type SavedSession = { day: string; i: number; queue: (Task | { word: string; placeholder: true })[]; tally: Record<string, unknown>; pending?: unknown };
@@ -489,7 +526,10 @@ export function session(fresh = false) {
     const queue = saved.queue.filter((t, k) => k < saved.i || ready.has(t.word));
     return { resume: { ...saved, queue }, tasks: [], counts: counts(), criterion: CRITERION };
   }
-  return { tasks: pick().picked.map((r) => task(r.id)).filter(Boolean) as Task[], counts: counts(), criterion: CRITERION };
+  const picked = pick().picked;
+  // The family questions go after the main pass, so other words come between them and each word's own tasks.
+  const bonus = picked.map((r) => kinTask(r.id)).filter(Boolean).slice(0, KIN_PER_SESSION) as Task[];
+  return { tasks: [...(picked.map((r) => task(r.id)).filter(Boolean) as Task[]), ...bonus], counts: counts(), criterion: CRITERION };
 }
 
 export function counts() {
