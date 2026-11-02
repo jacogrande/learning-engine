@@ -19,6 +19,28 @@ function directives() {
     });
 }
 
+// Notes keep underline and coloured highlight as two inline HTML tags, <u> and
+// <mark data-color="…">, since markdown has neither. Only those become elements; every other raw
+// HTML tag is still dropped.
+const OPEN = /^<(u|mark)(?:\s+data-color="([a-z]+)")?>$/i, CLOSE = /^<\/(u|mark)>$/i;
+function inlineMarks() {
+  const fold = (node: any) => {
+    if (!Array.isArray(node.children)) return;
+    const out: any[] = [];
+    for (let i = 0; i < node.children.length; i++) {
+      const c = node.children[i], open = c.type === "html" ? OPEN.exec(c.value) : null;
+      const end = open ? node.children.findIndex((x: any, k: number) => k > i && x.type === "html" && CLOSE.exec(x.value)?.[1].toLowerCase() === open[1].toLowerCase()) : -1;
+      if (!open || end < 0) { out.push(c); continue; }
+      const tag = open[1].toLowerCase();
+      out.push({ type: "inlineMark", children: node.children.slice(i + 1, end), data: { hName: tag, hProperties: tag === "mark" ? { className: `hl hl-${open[2] ?? "yellow"}` } : {} } });
+      i = end;
+    }
+    node.children = out;
+    out.forEach(fold);
+  };
+  return fold;
+}
+
 function Mermaid({ src }: { src: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -34,7 +56,7 @@ function Mermaid({ src }: { src: string }) {
     let live = true;
     import("mermaid").then(async ({ default: m }) => {
       const t = document.documentElement.dataset.theme;
-      m.initialize({ startOnLoad: false, theme: t === "dark" || (t !== "light" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "neutral" });
+      m.initialize({ startOnLoad: false, theme: t === "dark" || (t !== "light" && t !== "sepia" && matchMedia("(prefers-color-scheme: dark)").matches) ? "dark" : "neutral" });
       try {
         const { svg } = await m.render("m" + Math.random().toString(36).slice(2), src);
         if (live && ref.current) ref.current.innerHTML = svg;
@@ -56,7 +78,7 @@ function Fence({ lang, code, children }: { lang: string; code: string; children:
 
 // Defined once at module scope: new component identities on each render would
 // remount every quiz and drop focus from its inputs on every keystroke.
-const plugins = [remarkGfm, remarkDirective, directives];
+const plugins = [remarkGfm, remarkDirective, directives, inlineMarks];
 const components = {
   pre: ({ children }: any) => <>{children}</>,   // fences are handled in `code`
   code: ({ className, children, ...rest }: any) => {

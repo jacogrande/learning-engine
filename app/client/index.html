@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Learning</title>
-<script>(function(){var t=localStorage.getItem("theme");if(t==="light"||t==="dark")document.documentElement.dataset.theme=t;})();</script>
+<script>(function(){try{var d=document.documentElement.dataset,t=localStorage.getItem("theme");if(t==="light"||t==="dark"||t==="sepia")d.theme=t;["size","font","spacing"].forEach(function(k){var v=localStorage.getItem("read-"+k);if(v)d["read"+k[0].toUpperCase()+k.slice(1)]=v;});}catch(e){}})();</script>
 <link rel="stylesheet" href="./styles.css">
 </head>
 <body>

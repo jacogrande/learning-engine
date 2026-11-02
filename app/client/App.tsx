@@ -67,7 +67,7 @@ export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; childr
             <span key={i}><span className="sep">/</span>{c.to ? <Link to={c.to}>{c.label}</Link> : <span className="current">{c.label}</span>}</span>
           ))}
         </nav>
-        <div className="top-right"><Link to="/vocab" className="top-review" >Vocab</Link><ReviewLink /><Sync /><Theme /></div>
+        <div className="top-right"><Link to="/vocab" className="top-review" >Vocab</Link><ReviewLink /><Sync /><ReadingMenu /></div>
       </header>
       <div className={className}>{children}</div>
     </>
@@ -95,16 +95,53 @@ function Sync() {
   );
 }
 
-function Theme() {
-  const [t, setT] = useState(localStorage.getItem("theme") ?? "system");
-  const pick = (v: string) => {
-    if (v === "system") { localStorage.removeItem("theme"); delete document.documentElement.dataset.theme; }
-    else { localStorage.setItem("theme", v); document.documentElement.dataset.theme = v; }
-    setT(v);
-    dispatchEvent(new Event("themechange"));   // diagrams re-render in the new palette
+// The Aa menu: reading settings for lesson text, and the theme. Each is a data-* attribute on <html>
+// that styles.css reads, kept in localStorage (index.html applies them before the first paint).
+const READING = {
+  size: { label: "Size", options: [["s", "S"], ["m", "M"], ["l", "L"], ["xl", "XL"]], fallback: "m" },
+  font: { label: "Font", options: [["sans", "Sans"], ["serif", "Serif"], ["atkinson", "Atkinson"]], fallback: "sans" },
+  spacing: { label: "Line spacing", options: [["normal", "Normal"], ["roomy", "Roomy"]], fallback: "normal" },
+  theme: { label: "Theme", options: [["system", "System"], ["light", "Light"], ["sepia", "Sepia"], ["dark", "Dark"]], fallback: "system" },
+} as const;
+type Setting = keyof typeof READING;
+const stored = (k: Setting) => { try { return localStorage.getItem(k === "theme" ? "theme" : `read-${k}`); } catch { return null; } };
+
+function ReadingMenu() {
+  const [open, setOpen] = useState(false);
+  const [v, setV] = useState(() => Object.fromEntries((Object.keys(READING) as Setting[]).map((k) => [k, stored(k) ?? READING[k].fallback])) as Record<Setting, string>);
+  const box = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const away = (e: Event) => { if (!box.current?.contains(e.target as Node)) setOpen(false); };
+    const esc = (e: KeyboardEvent) => { if (e.key === "Escape") { setOpen(false); (box.current?.firstElementChild as HTMLElement)?.focus(); } };
+    document.addEventListener("pointerdown", away); document.addEventListener("keydown", esc);
+    return () => { document.removeEventListener("pointerdown", away); document.removeEventListener("keydown", esc); };
+  }, [open]);
+  const pick = (k: Setting, x: string) => {
+    const key = k === "theme" ? "theme" : `read-${k}`, attr = k === "theme" ? "theme" : `read${k[0].toUpperCase()}${k.slice(1)}`;
+    const ds = document.documentElement.dataset as Record<string, string | undefined>;
+    try { x === READING[k].fallback ? localStorage.removeItem(key) : localStorage.setItem(key, x); } catch {}
+    if (x === READING[k].fallback) delete ds[attr]; else ds[attr] = x;
+    setV((p) => ({ ...p, [k]: x }));
+    if (k === "theme") dispatchEvent(new Event("themechange"));   // diagrams re-render in the new palette
   };
   return (
-    <div className="theme">{["system", "light", "dark"].map((v) => <button key={v} aria-pressed={t === v} onClick={() => pick(v)}>{v}</button>)}</div>
+    <div className="reading-menu" ref={box}>
+      <button className="reading-toggle" aria-expanded={open} aria-haspopup="dialog" title="Reading settings" aria-label="Reading settings" onClick={() => setOpen(!open)}>Aa</button>
+      {open && (
+        <div className="reading-pop" role="dialog" aria-label="Reading settings">
+          {(Object.keys(READING) as Setting[]).map((k) => (
+            <div key={k} className="reading-row">
+              <span className="muted">{READING[k].label}</span>
+              <div className="theme" role="group" aria-label={READING[k].label}>
+                {READING[k].options.map(([x, label]) => <button key={x} aria-pressed={v[k] === x} onClick={() => pick(k, x)} className={k === "font" ? `font-${x}` : undefined}>{label}</button>)}
+              </div>
+            </div>
+          ))}
+          <p className="meta">Size, font and spacing apply to lessons.</p>
+        </div>
+      )}
+    </div>
   );
 }
 
