@@ -76,12 +76,24 @@ function Mermaid({ src }: { src: string }) {
 
 // ```abc fences: staff notation written in ABC, engraved by abcjs, with a player when the
 // browser can synthesize audio. The soundfont streams from abcjs's default CDN on first play.
+//
+// Swing: abcjs parses `%%MIDI swing N` but never plays it, so the tune's own value is read here and
+// passed as the synth's `swing` option (50 straight, 66 triplet feel, 75 the most). A selector
+// beside the player changes it while listening. abcjs swings only in x/4 and x/8 meters.
+const SWINGS: [number, string][] = [[50, "Straight"], [60, "Light"], [66, "Triplet"], [75, "Hard"]];
+const swingOf = (src: string) => { const n = Number(/^%%MIDI\s+swing\s+(\d+)/m.exec(src)?.[1]); return n > 50 ? Math.min(75, n) : 50; };
+
 function Abc({ src }: { src: string }) {
   const ref = useRef<HTMLDivElement>(null);
   const audio = useRef<HTMLDivElement>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [swing, setSwing] = useState(() => swingOf(src));
+  const [swings, setSwings] = useState(false);   // the meter can swing and the player is up
+  const player = useRef<{ controller: any; tune: any } | null>(null);
   useEffect(() => {
     let live = true, ctl: { pause(): void } | null = null;
+    const initial = swingOf(src);
+    setSwing(initial);
     import("abcjs").then((mod) => {
       const abc: typeof mod = (mod as any).default?.renderAbc ? (mod as any).default : mod;   // CJS interop varies by bundler
       if (!live || !ref.current) return;
@@ -101,14 +113,35 @@ function Abc({ src }: { src: string }) {
             onEvent: (ev) => { clear(); lit = (ev.elements ?? []).flat(); lit.forEach((e) => e.classList.add("is-playing")); },
             onFinished: clear,
           }, { displayPlay: true, displayProgress: true, displayRestart: true, displayLoop: true, displayWarp: true });
-          controller.setTune(tune, false).catch((e: unknown) => console.warn("abc audio:", e));
+          controller.setTune(tune, false, { swing: initial }).catch((e: unknown) => console.warn("abc audio:", e));
+          player.current = { controller, tune };
+          setSwings([4, 8].includes(tune.getMeterFraction().den ?? 0));
         }
       } catch (e) { console.warn("abc:", e); setErr(String(e)); }
     });
-    return () => { live = false; ctl?.pause(); };
+    return () => { live = false; ctl?.pause(); player.current = null; setSwings(false); };
   }, [src]);
+  // A new feel re-primes the synth; playback stops and starts again from the top.
+  const changeSwing = (n: number) => {
+    setSwing(n);
+    const p = player.current; if (!p) return;
+    p.controller.pause();
+    p.controller.setTune(p.tune, true, { swing: n }).catch((e: unknown) => console.warn("abc audio:", e));
+  };
   if (err) return <pre className="block-error">{src}</pre>;
-  return <figure className="abc"><div className="abc-score" ref={ref} /><div className="abc-audio" ref={audio} /></figure>;
+  return (
+    <figure className="abc">
+      <div className="abc-score" ref={ref} />
+      <div className="abc-player">
+        <div className="abc-audio" ref={audio} />
+        {swings && (
+          <div className="theme abc-swing" role="group" aria-label="Swing">
+            {(SWINGS.some(([n]) => n === swingOf(src)) ? SWINGS : [...SWINGS, [swingOf(src), String(swingOf(src))] as [number, string]].sort((a, b) => a[0] - b[0])).map(([n, label]) => <button key={n} type="button" aria-pressed={swing === n} title={n === 50 ? "Even eighths" : `Swing ${n}: the first eighth takes ${n}% of the beat`} onClick={() => changeSwing(n)}>{label}</button>)}
+          </div>
+        )}
+      </div>
+    </figure>
+  );
 }
 
 // ::youtube{v="id" t="1:43" end="1:49" title="…"} → a player for just that passage. YouTube's chrome is

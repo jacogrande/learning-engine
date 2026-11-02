@@ -271,6 +271,9 @@ article img, .mermaid svg { max-width: 100%; }
 .abc-score svg { max-width: 100%; }
 .abc-score .is-playing { fill: var(--accent); stroke: var(--accent); }
 .abc-audio:empty { display: none; }
+.abc-player { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.abc-player .abc-audio { flex: 1; min-width: 240px; }
+.abc-swing { margin-top: var(--s-2); font-family: var(--font); }
 .abcjs-inline-audio { display: flex; align-items: center; gap: 2px; height: 32px; margin-top: var(--s-2); padding: 0 var(--s-2); border: var(--hairline) solid var(--faint); border-radius: var(--radius-2); background: var(--code); box-sizing: border-box; }
 .abcjs-inline-audio.abcjs-disabled { opacity: .5; }
 .abcjs-css-warning { display: none; }   /* abcjs shows this badge unless its stylesheet is detected */
