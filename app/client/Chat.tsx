@@ -69,8 +69,20 @@ export function Thread({ id, onBack, onTurns, hideContext, readOnly }: { id: str
     else setPending((p) => (p ?? "") + ev.delta);
   }, [id]));
   // Follow the newest message inside the thread's own scroll box. Not scrollIntoView: it also scrolls
-  // the page, so sending a message would move the lesson the learner was reading.
-  useEffect(() => { const t = thread.current; if (!readOnly && t) t.scrollTop = t.scrollHeight; onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
+  // the page, so sending a message would move the lesson the learner was reading. A reply can grow
+  // after it renders (a score engraving, a diagram): while the reader is at the bottom, stay there.
+  const atBottom = useRef(true);
+  useEffect(() => {
+    const t = thread.current; if (!t || readOnly) return;
+    const onScroll = () => { atBottom.current = t.scrollHeight - t.scrollTop - t.clientHeight < 24; };
+    const ro = new ResizeObserver(() => { if (atBottom.current) t.scrollTop = t.scrollHeight; });
+    for (const c of Array.from(t.children)) ro.observe(c);
+    const mo = new MutationObserver(() => { ro.disconnect(); for (const c of Array.from(t.children)) ro.observe(c); });
+    mo.observe(t, { childList: true });
+    t.addEventListener("scroll", onScroll);
+    return () => { ro.disconnect(); mo.disconnect(); t.removeEventListener("scroll", onScroll); };
+  }, [readOnly]);
+  useEffect(() => { const t = thread.current; if (!readOnly && t) { t.scrollTop = t.scrollHeight; atBottom.current = true; } onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
 
   return (
     <div className="chat">

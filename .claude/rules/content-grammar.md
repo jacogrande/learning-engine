@@ -42,7 +42,7 @@ flowchart LR
 
 ## Notation
 
-A fenced `abc` block holds [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1). The app engraves it and adds a player, so a reader can hear every phrase. Always set `M:`, `L:`, `K:` and `Q:`; put chord symbols in double quotes before the note they sit on; `%` starts a comment. A space between notes breaks the beam, so write the eighths of one beat group without spaces (`GCD^D`) and keep the space only between groups. Write concert pitch unless the section says otherwise. A phrase taken from a recording names the source and the timestamp in the prose, never only in the block. For a swung phrase in an x/4 or x/8 meter, add `%%MIDI swing 66` after `K:` (50 is straight, 60 light, 66 a triplet feel, 75 the most); the player starts at that feel and lets the reader change it. Notate swung eighths as plain eighths, never as dotted pairs.
+A fenced `abc` block holds one tune in [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1): one `X:` line per fence; a second tune goes in its own fence. The app engraves it and adds a player, so a reader can hear every phrase. Always set `M:`, `L:`, `K:` and `Q:`; put chord symbols in double quotes before the note they sit on; `%` starts a comment. A space between notes breaks the beam, so write the eighths of one beat group without spaces (`GCD^D`) and keep the space only between groups. Write concert pitch unless the section says otherwise. A phrase taken from a recording names the source and the timestamp in the prose, never only in the block. For a swung phrase in an x/4 or x/8 meter, add `%%MIDI swing 66` after `K:` (50 is straight, 60 light, 66 a triplet feel, 75 the most); the player starts at that feel and lets the reader change it. Notate swung eighths as plain eighths, never as dotted pairs. Every bar fills the meter, except a pickup first bar and its complement at the end; the reader lists a bar that does not, and every parser warning, under the score. Notation never goes inside a `quiz` block: a fence there ends the question early. Put the score in the prose just before the question and refer to it.
 
 ````markdown
 ```abc
@@ -58,7 +58,7 @@ K:C
 
 ## Video
 
-A leaf directive embeds a player for one passage of a YouTube video: it plays from `t` to `end`, and its reset button jumps back to `t`. Use it only for a recording the section quotes, placed right after the prose that cites the moment. `v` is the video id, `t` and `end` are `m:ss` or seconds (`end` may carry a decimal, `1:48.5`), `title` is the caption. Quote every value.
+A leaf directive embeds a player for one passage of a YouTube video: it plays from `t` to `end`, and its reset button jumps back to `t`. Use it only for a recording the section quotes, placed right after the prose that cites the moment. `v` is the video id, `t` and `end` are `m:ss`, seconds or `1m43s` (either may carry a decimal, `1:48.5`), `title` is the caption. Quote every value; a value cannot hold a double quote, even escaped, so use single or curly quotes inside a title. Always the two-colon form: `:::youtube` would take in everything after it.
 
 ```markdown
 ::youtube{v="-_lIEU7mz8s" t="1:43" end="1:49" title="Stan Getz, Pennies from Heaven, 1957"}

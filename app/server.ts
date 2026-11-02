@@ -538,6 +538,9 @@ Bun.serve({
     // Only orphans can be removed: a card whose question still exists would just come back.
     "/api/review/cards/:course/:question/delete": { POST: (req) => { const c = db.query("SELECT state FROM cards WHERE course=? AND question=?").get(req.params.course, req.params.question) as any; if (c?.state !== "orphaned") return json({ error: "only orphaned cards can be removed" }, 400); deleteCard(req.params.course, req.params.question); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
 
+    // abcjs's prebuilt file, loaded by the first score on a page instead of living in the app bundle.
+    "/vendor/abcjs.js": () => new Response(Bun.file(join(import.meta.dir, "../node_modules/abcjs/dist/abcjs-basic-min.js")), { headers: { "content-type": "text/javascript", "cache-control": "max-age=86400" } }),
+
     // --- vocabulary ---------------------------------------------------------
     "/api/vocab": {
       GET: () => json({ words: vocab.listWords(), counts: vocab.counts() }),

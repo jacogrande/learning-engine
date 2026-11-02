@@ -4,9 +4,14 @@
 
 export type Quote = { quote: string; prefix: string; suffix: string };
 
+// Text that is not the lesson's words: an engraved score (its SVG carries CSS and titles), a player's
+// clock and menus, abcjs's hidden notices. Quotes and highlights skip it, so a selection across a
+// score quotes only the prose, and a highlight is found again whether or not the score has rendered.
+const skip = (n: Node) => !!n.parentElement?.closest("[data-noquote], svg, style, script, title, select");
+
 // Flatten a container's text nodes so character offsets map back to DOM positions.
 function textMap(root: Node) {
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (skip(n) ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT) });
   const nodes: { node: Text; start: number }[] = [];
   let text = "";
   while (walker.nextNode()) { const n = walker.currentNode as Text; nodes.push({ node: n, start: text.length }); text += n.data; }
@@ -14,7 +19,7 @@ function textMap(root: Node) {
     for (let i = nodes.length - 1; i >= 0; i--) if (nodes[i].start <= off) return [nodes[i].node, off - nodes[i].start];
     return [nodes[0]?.node, 0];
   };
-  return { text, at };
+  return { text, at, nodes };
 }
 
 const CTX = 32;
@@ -25,13 +30,17 @@ export function describe(root: HTMLElement): (Quote & { rect: DOMRect }) | null 
   if (!sel || sel.isCollapsed || !sel.rangeCount) return null;
   const range = sel.getRangeAt(0);
   if (!root.contains(range.commonAncestorContainer)) return null;
-  const quote = range.toString();
-  if (!quote.trim()) return null;
-  const { text } = textMap(root);
-  const pre = document.createRange();
-  pre.selectNodeContents(root);
-  pre.setEnd(range.startContainer, range.startOffset);
-  const start = pre.toString().length;
+  // The quote is the selected part of each kept text node, so its offset in textMap's text is exact.
+  const { text, nodes } = textMap(root);
+  let quote = "", start = -1;
+  for (const { node, start: at } of nodes) {
+    if (!range.intersectsNode(node)) continue;
+    const a = node === range.startContainer ? range.startOffset : 0, b = node === range.endContainer ? range.endOffset : node.data.length;
+    if (b <= a) continue;
+    if (start < 0) start = at + a;
+    quote += node.data.slice(a, b);
+  }
+  if (start < 0 || !quote.trim()) return null;
   return { quote, prefix: text.slice(Math.max(0, start - CTX), start), suffix: text.slice(start + quote.length, start + quote.length + CTX), rect: range.getBoundingClientRect() };
 }
 
