@@ -69,7 +69,7 @@ const save = (wid: string, set: Record<string, unknown>) => {
 const headOf = (w: Pick<VocabRow, "entry" | "word">) => w.entry?.headword ?? w.word;
 
 // --- capture ------------------------------------------------------------------
-export type Capture = { word: string; context?: string; course?: string | null; doc?: string | null; title?: string | null; courseTerm?: boolean };
+export type Capture = { word: string; context?: string; course?: string | null; doc?: string | null; title?: string | null; url?: string | null; courseTerm?: boolean };
 
 // A word already in the list (by what was typed or by its dictionary form) gains the new sentence as
 // another context instead of becoming a second entry.
@@ -80,7 +80,8 @@ export function addWord(c: Capture): { word: Word; existed: boolean } {
   const text = typeof c.context === "string" ? c.context.trim().slice(0, 600) : "";
   const i = text.toLowerCase().indexOf(typed.toLowerCase());
   const opt = (x: unknown) => (typeof x === "string" && x ? x : null);
-  const ctx: Context | null = text ? { text, form: i >= 0 ? text.slice(i, i + typed.length) : typed, course: opt(c.course), doc: opt(c.doc), title: opt(c.title), at: now() } : null;
+  const url = opt(c.url) && /^https?:\/\//.test(c.url!) ? c.url!.slice(0, 2000) : null;
+  const ctx: Context | null = text ? { text, form: i >= 0 ? text.slice(i, i + typed.length) : typed, course: opt(c.course), doc: opt(c.doc), title: opt(c.title)?.slice(0, 200) ?? null, url, at: now() } : null;
   const existing = (db.query("SELECT id, word, entry FROM vocab").all() as any[])
     .find((r) => norm(r.word) === norm(typed) || (r.entry && norm(JSON.parse(r.entry).headword ?? "") === norm(typed)));
   if (existing) {

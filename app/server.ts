@@ -273,6 +273,8 @@ watchContent();
 
 Bun.serve({
   port: Number(process.env.PORT ?? 4000),
+  // This machine only: the app can start Claude jobs and holds every note. HOST=0.0.0.0 opens it to the network.
+  hostname: process.env.HOST ?? "127.0.0.1",
   development: { hmr: true, console: false },
   routes: {
     "/api/events": (req) => sse(req),

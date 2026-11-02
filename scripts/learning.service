@@ -1,0 +1,22 @@
+[Unit]
+Description=Learning (the course app at http://localhost:4000)
+# Install: systemctl --user enable --now ~/Projects/learning/scripts/learning.service
+# Logs:    journalctl --user -u learning -f
+# After pulling server changes: systemctl --user restart learning
+After=network-online.target
+
+[Service]
+Type=exec
+WorkingDirectory=%h/Projects/learning
+ExecStart=/usr/bin/bun run app/server.ts
+# claude (~/.local/bin) must resolve for generation and grading jobs. git push uses the
+# ssh-agent socket, which systemd's user environment already carries.
+Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+Environment=PORT=4000
+# On stop the server cancels running jobs and pushes pending notes and chats (up to 8 s).
+TimeoutStopSec=20
+Restart=on-failure
+RestartSec=3
+
+[Install]
+WantedBy=default.target

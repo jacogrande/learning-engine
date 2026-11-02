@@ -8,7 +8,7 @@ import { Link, Shell } from "./App";
 export type Example = { sentence: string; form: string };
 export type Probe = { question: string; answer: string };
 export type Entry = { headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[]; confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[] };
-export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; at: string };
+export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };
 export type Word = {
   id: string; word: string; contexts: Context[]; courseTerm: string | null; entry: Entry | null; status: "pending" | "ready" | "failed"; writing: boolean; stage: number;
   trainedAt: string | null; createdAt: string; trains: number;
@@ -247,7 +247,9 @@ export function WordEntry({ w }: { w: Pick<Word, "entry" | "contexts" | "courseT
       {w.contexts.length > 0 && <>
         <h4>Where you met it</h4>
         <ul className="contexts">{w.contexts.map((c, i) => (
-          <li key={i}><Markdown body={`> ${bold(c.text, c.form)}`} />{c.doc && c.course ? <Link to={`/c/${c.course}/m/${c.doc.split("/").slice(1).join("/")}`} className="muted">{c.title ?? "source"}</Link> : c.title ? <span className="muted">{c.title}</span> : null}</li>
+          <li key={i}><Markdown body={`> ${bold(c.text, c.form)}`} />{c.doc && c.course ? <Link to={`/c/${c.course}/m/${c.doc.split("/").slice(1).join("/")}`} className="muted">{c.title ?? "source"}</Link>
+            : c.url ? <a href={c.url} target="_blank" rel="noreferrer" className="muted">{c.title || new URL(c.url).hostname}</a>
+            : c.title ? <span className="muted">{c.title}</span> : null}</li>
         ))}</ul>
       </>}
     </div>
