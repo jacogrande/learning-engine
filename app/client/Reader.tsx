@@ -80,6 +80,12 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const [chatDraft, setChatDraft] = useState<string | null>(null);
   const [found, setFound] = useState<Record<string, Range>>({});      // highlights that still match the text
   const [drawer, setDrawer] = useState<"nav" | "pane" | null>(null);   // narrow screens: which column is open as a drawer
+  // Wide screens: the contents column and the Notes/Chat panel can each be collapsed to a slim rail.
+  // Remembered across visits. (On narrow screens they are drawers and these do nothing.)
+  const [folded, setFolded] = useState<{ nav: boolean; pane: boolean }>(() => { try { return { nav: false, pane: false, ...JSON.parse(localStorage.getItem("readerFolded") ?? "{}") }; } catch { return { nav: false, pane: false }; } });
+  const fold = (which: "nav" | "pane", on: boolean) => setFolded((f) => { const n = { ...f, [which]: on }; try { localStorage.setItem("readerFolded", JSON.stringify(n)); } catch {} return n; });
+  // Anything that asks for Notes or Chat (a tab, a shortcut, a selection's Note or Chat) opens the panel.
+  const openPane = (which: "notes" | "chat") => { setPane(which); setDrawer("pane"); fold("pane", false); };
   // Pane width: drag its left edge; remembered per browser.
   const [paneW, setPaneW] = useState<number | null>(() => { try { return Number(localStorage.getItem("paneWidth")) || null; } catch { return null; } });
   const [resizing, setResizing] = useState(false);
@@ -95,7 +101,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
 
   // ?chat=<id> (from the notebook): open that chat in the pane.
   const openChat = new URLSearchParams(location.search).get("chat");
-  useEffect(() => { window.scrollTo(0, 0); setSel(null); setDrawer(null); if (openChat) { setPane("chat"); setDrawer("pane"); } }, [current, openChat]);
+  useEffect(() => { window.scrollTo(0, 0); setSel(null); setDrawer(null); if (openChat) openPane("chat"); }, [current, openChat]);
   useEffect(() => {
     if (!drawer) return;
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
@@ -108,7 +114,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.code !== "Digit1" && e.code !== "Digit2")) return;
       e.preventDefault(); e.stopPropagation();
       const which = e.code === "Digit1" ? "notes" : "chat";
-      setPane(which); setDrawer("pane");
+      openPane(which);
       if (which === "notes") focusWhenShown(".pane .notes-editor");   // chat focuses itself (below)
     };
     addEventListener("keydown", onKey, true); return () => removeEventListener("keydown", onKey, true);
@@ -118,8 +124,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const shown = useRef(false);
   useEffect(() => {
     if (!shown.current) { shown.current = true; return; }
-    if (pane === "chat") focusWhenShown(".pane .composer textarea");
-  }, [pane, drawer]);
+    if (pane === "chat" && !folded.pane) focusWhenShown(".pane .composer textarea");
+  }, [pane, drawer, folded.pane]);
   // Opened without a section: pin the chosen one into the URL first. Otherwise marking it read would
   // make the next one "first unread", and so on down the module.
   useEffect(() => {
@@ -213,11 +219,11 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     const q: Quote = { quote: sel.quote, prefix: sel.prefix, suffix: sel.suffix };
     if (what === "note") {
       post(`/api/courses/${slug}/annotations`, { doc: docPath, ...q }).then(reloadAnnotations);
-      notes.current?.addQuote(q.quote, title, `${here}/${current}`); setPane("notes"); setDrawer("pane");
+      notes.current?.addQuote(q.quote, title, `${here}/${current}`); openPane("notes");
     }
     if (what === "reading") post(`/api/courses/${slug}/reading`, { doc: docPath, quote: q.quote });
     if (what === "drill") setAsk(q);
-    if (what === "chat") { setChatDraft(q.quote); setPane("chat"); setDrawer("pane"); }
+    if (what === "chat") { setChatDraft(q.quote); openPane("chat"); }
     setSel(null); getSelection()?.removeAllRanges();
   };
 
@@ -229,8 +235,11 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const tally = testSpecs.reduce((t, id) => { const r = saved[id]?.result; if (r) t[r] = (t[r] ?? 0) + 1; return t; }, {} as Record<string, number>);
 
   return (
-    <Shell crumbs={[...crumbs, { label: mod.title }]} className={`reader ${drawer ? `drawer-${drawer}` : ""}`}>
+    <Shell crumbs={[...crumbs, { label: mod.title }]} className={`reader ${drawer ? `drawer-${drawer}` : ""} ${folded.nav ? "nav-folded" : ""} ${folded.pane ? "pane-folded" : ""}`}>
       <nav className="side" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) setDrawer(null); }}>
+        <button className="fold fold-nav" onClick={() => fold("nav", true)} aria-label="Collapse contents" title="Collapse contents">
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>
+        </button>
         <div className="side-title">{mod.title}</div>
         <ul>
           {sections.map((s) => {
@@ -263,12 +272,15 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
         </ol>
       </nav>
 
+      <div className="rail rail-nav">
+        <button className="fold" onClick={() => fold("nav", false)} aria-label="Show contents" title="Show contents"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" /></svg></button>
+      </div>
       <main className="content">
         <div className="reader-tools">
           <button className="nav-toggle" onClick={() => setDrawer("nav")}>Contents</button>
           <span className="spacer" />
-          <button onClick={() => { setPane("notes"); setDrawer("pane"); }}>Notes</button>
-          <button onClick={() => { setPane("chat"); setDrawer("pane"); }}>Chat</button>
+          <button onClick={() => openPane("notes")}>Notes</button>
+          <button onClick={() => openPane("chat")}>Chat</button>
         </div>
         {(unknownFile || docError) && !isWrap ? (
           <article><h1>Not found</h1><p className="muted">This page is no longer in the module. It may have been renamed when the module was regenerated. <Link to={here}>Open the module →</Link></p></article>
@@ -318,11 +330,17 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
       </main>
 
       <div className="scrim" onClick={() => setDrawer(null)} />
+      <div className="rail rail-pane">
+        <button className="fold" onClick={() => fold("pane", false)} aria-label="Show notes and chat" title="Show notes and chat"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg></button>
+        <button className="rail-tab" onClick={() => openPane("notes")} title={`Notes (${MOD}1)`}>Notes</button>
+        <button className="rail-tab" onClick={() => openPane("chat")} title={`Chat (${MOD}2)`}>Chat</button>
+      </div>
       <aside className={`pane ${resizing ? "is-resizing" : ""}`} style={paneW ? { width: paneW } : undefined}>
         <div className="pane-resizer" onPointerDown={startResize} title="Drag to resize" />
         <div className="pane-tabs">
           <button aria-pressed={pane === "notes"} onClick={() => setPane("notes")} title={`Notes (${MOD}1)`} aria-keyshortcuts="Meta+1 Control+1">Notes</button>
           <button aria-pressed={pane === "chat"} onClick={() => setPane("chat")} title={`Chat (${MOD}2)`} aria-keyshortcuts="Meta+2 Control+2">Chat</button>
+          <button className="fold fold-pane" onClick={() => fold("pane", true)} aria-label="Collapse notes and chat" title="Collapse notes and chat"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 3l5 5-5 5" /></svg></button>
           <button className="pane-close" aria-label="Close" onClick={() => setDrawer(null)}>×</button>
         </div>
         <div className="pane-body" hidden={pane !== "notes"}>

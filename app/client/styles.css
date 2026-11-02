@@ -380,6 +380,21 @@ ul.block-note { padding-left: var(--s-6); }
 }
 .pane-tabs button:hover { color: var(--fg); background: transparent; }
 .pane-tabs button[aria-pressed="true"] { color: var(--fg); border-bottom-color: var(--accent-fill); }
+/* Collapse to a rail (wide screens only; narrow screens use drawers). */
+.fold { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; min-height: 0; padding: 0; border: 0; border-radius: var(--radius-1); background: none; color: var(--muted); }
+.fold:hover { color: var(--fg); background: var(--hover); border: 0; }
+.fold svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.fold-nav { float: right; margin: -6px -6px 0 var(--s-1); }
+.fold-pane { margin-left: auto; align-self: center; }
+.rail { display: none; flex: none; position: sticky; top: var(--top-h); height: calc(100vh - var(--top-h)); width: 40px; flex-direction: column; align-items: center; gap: var(--s-2); padding-top: var(--s-4); background: var(--bg); }
+.rail-nav { border-right: var(--hairline) solid var(--faint); }
+.rail-pane { border-left: var(--hairline) solid var(--faint); }
+.rail-tab { writing-mode: vertical-rl; width: 28px; min-height: 0; padding: var(--s-3) 0; border: 0; font-size: var(--fs-small); font-weight: 500; color: var(--muted); }
+.rail-tab:hover { color: var(--fg); border: 0; }
+@media (min-width: 761px) { .reader.nav-folded .side { display: none; } .reader.nav-folded .rail-nav { display: flex; } }
+@media (min-width: 1101px) { .reader.pane-folded .pane { display: none; } .reader.pane-folded .rail-pane { display: flex; } }
+@media (max-width: 1100px) { .fold-pane { display: none; } }
+@media (max-width: 760px) { .fold-nav { display: none; } }
 .pane-close { display: none; margin-left: auto; width: var(--control-h-touch); padding: 0; font-size: var(--fs-h2); font-weight: 400; }
 .pane-body { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding: var(--s-4) var(--s-5) var(--s-7); }
 .pane-body[hidden] { display: none; }
