@@ -40,6 +40,30 @@ flowchart LR
 ```
 ````
 
+## Notation
+
+A fenced `abc` block holds [ABC notation](https://abcnotation.com/wiki/abc:standard:v2.1). The app engraves it and adds a player, so a reader can hear every phrase. Always set `M:`, `L:`, `K:` and `Q:`; put chord symbols in double quotes before the note they sit on; `%` starts a comment. A space between notes breaks the beam, so write the eighths of one beat group without spaces (`GCD^D`) and keep the space only between groups. Write concert pitch unless the section says otherwise. A phrase taken from a recording names the source and the timestamp in the prose, never only in the block.
+
+````markdown
+```abc
+X:1
+T:ii-V-I in C
+M:4/4
+L:1/8
+Q:1/4=140
+K:C
+"Dm7" DFAc dcAF | "G7" _AGFE DB,G,F, | "Cmaj7" E4 z4 |]
+```
+````
+
+## Video
+
+A leaf directive embeds a player for one passage of a YouTube video: it plays from `t` to `end`, and its reset button jumps back to `t`. Use it only for a recording the section quotes, placed right after the prose that cites the moment. `v` is the video id, `t` and `end` are `m:ss` or seconds (`end` may carry a decimal, `1:48.5`), `title` is the caption. Quote every value.
+
+```markdown
+::youtube{v="-_lIEU7mz8s" t="1:43" end="1:49" title="Stan Getz, Pennies from Heaven, 1957"}
+```
+
 ## Questions
 
 A fenced `quiz` block with a YAML body. Every section ends with one to three. Default `short`; `mcq` only when the distractors are confusions worth telling apart.
