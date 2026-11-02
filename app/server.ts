@@ -596,6 +596,7 @@ Bun.serve({
       },
       DELETE: (req) => word(req, (wid) => { if (!vocab.getWord(wid)) return null; vocab.deleteWord(wid); return { ok: true }; }),
     },
+    "/api/vocab/:id/family": { POST: async (req) => { const { word: kin } = (await req.json()) as { word: string }; try { return await word(req, (wid) => vocab.addKin(wid, String(kin ?? ""))); } catch (e) { return json({ error: (e as Error).message }, 400); } } },
     "/api/vocab/:id/regenerate": { POST: async (req) => word(req, async (wid) => { if (!vocab.getWord(wid)) return null; await vocab.enrich(wid); return { ok: true }; }) },
     "/api/vocab/:id/meet": { POST: (req) => word(req, (wid) => vocab.meet(wid)) },
     "/api/vocab/:id/finish": { POST: async (req) => { const body = await req.json(); return word(req, (wid) => vocab.finishWord(wid, body)); } },

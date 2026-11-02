@@ -8,12 +8,16 @@ export const VOCAB = "_vocab";
 
 export type Example = { sentence: string; form: string };
 export type Probe = { question: string; answer: string };
+// A word built on the same root (`bereave`, `bereavement` beside `bereft`). `separate`: its meaning has
+// drifted, or it is easily confused with the headword, so it is worth learning as its own word.
+export type Kin = { word: string; pos: string; relation: string; sense: string; example: Example | null; separate: boolean };
 // `examples` teach: each makes the meaning inferable. `tests` only fit: a learner who does not know
 // the word cannot read its meaning off them, so they test the word, not inference. `forms` are the
 // headword's inflections, the only answers a fill-in accepts without the grader.
 export type Entry = {
   headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[];
   confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[];
+  family?: Kin[];   // absent on entries written before families existed; a background job fills it in
 };
 // `url`: the web page a word was captured from (the browser extension); course words have `doc` instead.
 export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };

@@ -11,7 +11,7 @@ import { listCourses } from "./content";
 import { rate, readProfile, patchProfile, GRADE_SCHEMA, isResult, type Result } from "./review";
 import {
   VOCAB, wordRow, parseRow, testPool, anchorOf, lastAsked, freshest, blank, day,
-  type Context, type Entry, type Example, type Format, type Probe, type TrainLog, type VocabRow,
+  type Context, type Entry, type Example, type Format, type Kin, type Probe, type TrainLog, type VocabRow,
 } from "./vocab-spec";
 
 export { VOCAB };
@@ -27,6 +27,9 @@ const LOG_MAX = 80;
 export const validId = (x: string) => /^[0-9a-f]{8}$/.test(x);
 
 const EXAMPLE = { type: "object", properties: { sentence: { type: "string" }, form: { type: "string" } }, required: ["sentence", "form"] };
+const FAMILY = { type: "array", items: { type: "object", properties: {
+  word: { type: "string" }, pos: { type: "string" }, relation: { type: "string" }, sense: { type: "string" }, example: EXAMPLE, separate: { type: "boolean" },
+}, required: ["word", "pos", "relation", "sense", "example", "separate"] } };
 const ENTRY_SCHEMA = {
   type: "object",
   properties: {
@@ -36,8 +39,9 @@ const ENTRY_SCHEMA = {
     confusable: { type: ["object", "null"], properties: { word: { type: "string" }, difference: { type: "string" } } },
     parts: { type: ["string", "null"] }, register: { type: ["string", "null"] },
     probes: { type: "array", items: { type: "object", properties: { question: { type: "string" }, answer: { type: "string" } }, required: ["question", "answer"] } },
+    family: FAMILY,
   },
-  required: ["headword", "pos", "explanation", "forms", "examples", "tests", "probes"],
+  required: ["headword", "pos", "explanation", "forms", "examples", "tests", "probes", "family"],
 };
 
 // --- the list ---------------------------------------------------------------------
@@ -165,7 +169,18 @@ function cleanEntry(e: any, word: string): Entry | null {
     confusable: str(e.confusable?.word) && str(e.confusable?.difference) ? { word: str(e.confusable.word), difference: str(e.confusable.difference) } : null,
     parts: str(e.parts) || null, register: str(e.register) || null,
     probes: (Array.isArray(e.probes) ? e.probes : []).map((p: any) => ({ question: str(p?.question), answer: str(p?.answer) })).filter((p: Probe) => p.question && p.answer).slice(0, 6),
+    ...(Array.isArray(e.family) ? { family: cleanFamily(e.family, headword, e.forms) } : {}),
   };
+}
+
+// Family members: a real word, not the headword or one of its inflections, each listed once.
+function cleanFamily(list: any[], headword: string, forms: unknown): Kin[] {
+  const own = new Set([headword, ...(Array.isArray(forms) ? forms : [])].map((x) => norm(String(x))));
+  const seen = new Set<string>();
+  return list.map((k: any) => {
+    const word = str(k?.word), ex = { sentence: str(k?.example?.sentence), form: str(k?.example?.form) };
+    return { word, pos: str(k?.pos), relation: str(k?.relation), sense: str(k?.sense), example: ex.sentence && ex.form && ex.sentence.includes(ex.form) ? ex : null, separate: !!k?.separate };
+  }).filter((k) => k.word && k.sense && k.word.length <= 40 && !own.has(norm(k.word)) && !seen.has(norm(k.word)) && seen.add(norm(k.word))).slice(0, 6);
 }
 
 // A word becomes a review card when Train first meets it, first due the next day: a card for a word
@@ -214,6 +229,32 @@ export function deleteWord(wid: string) {
 export function resumePending() {
   for (const r of db.query("SELECT id FROM vocab WHERE status='pending'").all() as any[])
     enrich(r.id).catch((e) => { console.warn("vocab entry:", e.message); failed(r.id); });
+  // Entries written before word families existed get theirs, one background job each.
+  for (const r of db.query("SELECT id, entry FROM vocab WHERE status='ready' AND entry IS NOT NULL").all() as any[])
+    if (!("family" in JSON.parse(r.entry))) fillFamily(r.id);
+}
+
+// Writes only the family into an existing entry, leaving the learner's edits to the rest alone.
+function fillFamily(wid: string) {
+  const w = wordRow(wid);
+  if (!w?.entry || liveFor(VOCAB, wid).some((j) => j.kind === "vocab")) return;
+  enqueue(VOCAB, "vocab", `/vocab-entry\n\nWord family only, for: ${w.entry.headword} (${w.entry.pos}): ${w.entry.explanation}`, {
+    ref: wid, schema: { type: "object", properties: { family: FAMILY }, required: ["family"] },
+    then: (r: any) => {
+      const cur = wordRow(wid); if (!cur?.entry || !Array.isArray(r?.family)) return;
+      save(wid, { entry: JSON.stringify({ ...cur.entry, family: cleanFamily(r.family, cur.entry.headword, cur.entry.forms) }) });
+    },
+  });
+}
+
+// A family member added as its own word: its example sentence (seen on the entry) is where it was met,
+// so the new entry is written for that sense.
+export function addKin(wid: string, word: string) {
+  const w = wordRow(wid);
+  const k = w?.entry?.family?.find((x) => norm(x.word) === norm(word));
+  if (!w?.entry || !k) return null;
+  const from = w.contexts.find((c) => c.course) ?? null;
+  return addWord({ word: k.word, context: k.example?.sentence, title: `Family of “${w.entry.headword}”`, course: from?.course ?? null, doc: from?.doc ?? null });
 }
 
 // Once every test sentence has been asked twice, a background job writes new ones: a sentence seen

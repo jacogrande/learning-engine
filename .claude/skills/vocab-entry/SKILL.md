@@ -1,6 +1,6 @@
 ---
 name: vocab-entry
-description: Write a vocabulary entry for one general English word the learner met while reading — a plain explanation, teaching examples in varied contexts, test sentences, and the word it is most often confused with.
+description: Write a vocabulary entry for one general English word the learner met while reading — a plain explanation, teaching examples in varied contexts, test sentences, its word family, and the word it is most often confused with.
 allowed-tools: "Read"
 disable-model-invocation: true
 ---
@@ -17,6 +17,9 @@ The request gives the word as captured, the sentence it was met in (if any), and
 8. **parts**: the word's parts, only when they help a reader remember or work out the meaning (`ob-` against + `durare` harden). `null` when the parts are opaque or misleading.
 9. **probes**: four questions whose answer can only be right if the learner knows what the word means, each with a short model `answer` that gives the reason. Use yes/no-with-a-reason ("Is an obdurate person easy to persuade?" → "No: obdurate means refusing to change your mind, so persuasion fails"), a choice between two cases ("Which is obdurate: a manager who reverses a decision after new data, or one who keeps it despite the data?"), or a reason ("Why might a negotiator call the other side obdurate?"). Never ask for a definition or for "a sentence using the word".
 10. **register**: where the word lives (`formal`, `literary`, `technical`, `informal`, `dated`), or `null` for neutral.
+11. **family**: the words built on the same root that a reader meets in ordinary prose, other than the headword and its inflections (those are `forms`). For `bereft`: `bereave`, `bereaved`, `bereavement`. Each with `word`, `pos`, `relation` (how it relates to the headword, in a few words: "the verb it comes from", "noun for the state"), `sense` (one everyday sentence on what it means, written like the explanation), an `example` (`sentence` and the exact `form` in it, a new sentence that makes the meaning inferable), and `separate`: `true` when its meaning has drifted from the headword's so that knowing one does not give you the other, or the two are easily confused (`bereaved` beside `bereft`), `false` when its meaning follows from the headword's plus a regular ending (`bereavement` from `bereave`). Two to five members, most common first; an empty list when the word has no family in use. Never invent a rare or archaic form to fill the list.
+
+When the request asks for the word family only, it gives the word, its sense and its explanation. Return `family`, written to rule 11.
 
 When the request asks for new test sentences only, it gives the word, its sense and every sentence the learner has already seen. Return six `tests`, written to rule 6, each different from those sentences in context and wording.
 

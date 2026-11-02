@@ -7,7 +7,8 @@ import { Link, Shell } from "./App";
 
 export type Example = { sentence: string; form: string };
 export type Probe = { question: string; answer: string };
-export type Entry = { headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[]; confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[] };
+export type Kin = { word: string; pos: string; relation: string; sense: string; example: Example | null; separate: boolean };
+export type Entry = { headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[]; confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[]; family?: Kin[] };
 export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };
 export type Word = {
   id: string; word: string; contexts: Context[]; courseTerm: string | null; entry: Entry | null; status: "pending" | "ready" | "failed"; writing: boolean; stage: number;
@@ -183,7 +184,7 @@ export function VocabPage() {
           <div className="theme" role="group" aria-label="Filter">{(["all", "new", "climbing", "through", "problems"] as Filter[]).map((f) => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f}</button>)}</div>
         </div>
         <ul className="vocab-list">
-          {shown.map((w) => <WordRow key={w.id} w={w} open={openId === w.id} toggle={() => setOpenId(openId === w.id ? null : w.id)} reload={reload} />)}
+          {shown.map((w) => <WordRow key={w.id} w={w} all={data.words} open={openId === w.id} toggle={() => setOpenId(openId === w.id ? null : w.id)} reload={reload} />)}
         </ul>
         {!shown.length && <p className="muted">Nothing matches.</p>}
       </>}
@@ -196,7 +197,7 @@ export function Ladder({ stage }: { stage: number }) {
   return <span className="ladder" role="img" aria-label={label} title={label}>{RUNGS.map((r, i) => <i key={r} className={i < stage ? "on" : ""} />)}</span>;
 }
 
-function WordRow({ w, open, toggle, reload }: { w: Word; open: boolean; toggle: () => void; reload: () => void }) {
+function WordRow({ w, all, open, toggle, reload }: { w: Word; all: Word[]; open: boolean; toggle: () => void; reload: () => void }) {
   const [editing, setEditing] = useState(false);
   const e = w.entry;
   const name = e?.headword ?? w.word;
@@ -215,6 +216,7 @@ function WordRow({ w, open, toggle, reload }: { w: Word; open: boolean; toggle: 
         <div className="vocab-body" id={`wb-${w.id}`}>
           {(w.status === "failed" || stuck(w)) && <p className="actions"><span className="muted">{w.status === "failed" ? "The entry could not be written." : "Writing the entry was cut off when the server stopped."}</span><button onClick={regenerate}>Try again</button></p>}
           {e && !editing && <WordEntry w={w} />}
+          {e && !editing && <Family w={w} all={all} reload={reload} open={(id) => { location.hash = `w-${id}`; }} />}
           {e && editing && <EditEntry w={w} done={() => { setEditing(false); reload(); }} />}
           <div className="actions">
             {e && !editing && <button onClick={() => setEditing(true)}>Edit</button>}
@@ -252,6 +254,46 @@ export function WordEntry({ w }: { w: Pick<Word, "entry" | "contexts" | "courseT
             : c.title ? <span className="muted">{c.title}</span> : null}</li>
         ))}</ul>
       </>}
+    </div>
+  );
+}
+
+// The word's family: related words with their own sense and an example. Members whose meaning has
+// drifted (or that are easily confused with the word) can be added as words of their own; the rest are
+// shown so the learner sees how the word's forms spread, without a card for each. The member that is
+// the word's confusable waits for the Explain rung, like the confusable itself.
+function Family({ w, all, reload, open }: { w: Word; all: Word[]; reload: () => void; open: (id: string) => void }) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const e = w.entry!;
+  if (!e.family) return <p className="muted">Its word family is being written.</p>;
+  const conf = e.confusable?.word.toLowerCase();
+  const kin = e.family.filter((k) => w.stage >= 3 || k.word.toLowerCase() !== conf);
+  if (!kin.length) return null;
+  const listed = (word: string) => all.find((x) => [x.word, x.entry?.headword].some((t) => t?.toLowerCase() === word.toLowerCase()));
+  const add = async (word: string) => {
+    setBusy(word);
+    try { const r = await post<{ word: Word; existed: boolean }>(`/api/vocab/${w.id}/family`, { word }); toast(r.existed ? `“${word}” is already in your list.` : `Added “${word}”. Its entry is being written.`, `/vocab#w-${r.word.id}`); reload(); }
+    catch (x) { failed(`Adding “${word}”`)(x); }
+    setBusy(null);
+  };
+  return (
+    <div className="word-family">
+      <h4>Word family</h4>
+      <ul>{kin.map((k) => {
+        const have = listed(k.word);
+        return (
+          <li key={k.word}>
+            <p><strong>{k.word}</strong> <span className="muted">{[k.pos, k.relation].filter(Boolean).join(" · ")}</span></p>
+            <p>{k.sense}</p>
+            {k.example && <Markdown body={`> ${bold(k.example.sentence, k.example.form)}`} />}
+            <p className="actions">
+              {have ? <button className="link" onClick={() => open(have.id)}>In your list →</button>
+                : <button onClick={() => add(k.word)} disabled={busy === k.word}>{busy === k.word ? "Adding…" : "Add as its own word"}</button>}
+              {!have && k.separate && <span className="muted">Its meaning has moved away from “{e.headword}”: worth learning on its own.</span>}
+            </p>
+          </li>
+        );
+      })}</ul>
     </div>
   );
 }
