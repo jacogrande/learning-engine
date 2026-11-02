@@ -15,6 +15,20 @@ import { Link, NotFound, Shell } from "./App";
 // screen can clear the selection before the capture reads it.
 type Sel = Quote & { x: number; y: number; around: { word: string; sentence: string } | null };
 
+// Focus an element in the pane once it can take focus: on a narrow screen the pane is a drawer that is
+// still hidden in the frame it opens, so this retries for half a second.
+function focusWhenShown(selector: string) {
+  const until = Date.now() + 500;
+  const tryIt = () => {
+    const el = document.querySelector(selector) as HTMLElement | null;
+    if (el && document.activeElement !== el) el.focus({ preventScroll: true });
+    if ((!el || document.activeElement !== el) && Date.now() < until) setTimeout(tryIt, 40);
+  };
+  requestAnimationFrame(tryIt);
+}
+
+const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
+
 export function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file?: string }) {
   const { data: course, error: courseError } = useLive<Course>(`/api/courses/${slug}`);
   const { data: progress } = useLive<{ read?: Record<string, string>; completedAt?: string }>(`/api/courses/${slug}/progress/${moduleId}`, ["progress"]);
@@ -58,6 +72,25 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
     document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey);
   }, [drawer]);
+  // Cmd+1 / Cmd+2 (Ctrl on Linux and Windows): Notes or Chat, opened if closed, with the cursor in it.
+  // Captured before anything else, so the browser's own use of the keys is cancelled where it lets us.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.code !== "Digit1" && e.code !== "Digit2")) return;
+      e.preventDefault(); e.stopPropagation();
+      const which = e.code === "Digit1" ? "notes" : "chat";
+      setPane(which); setDrawer("pane");
+      if (which === "notes") focusWhenShown(".pane .notes-editor");   // chat focuses itself (below)
+    };
+    addEventListener("keydown", onKey, true); return () => removeEventListener("keydown", onKey, true);
+  }, []);
+  // Switching to Chat, by any route (tab, top bar, shortcut, a selection's Chat), puts the cursor in
+  // its input. Not on first load, so opening a section never takes focus from the page.
+  const shown = useRef(false);
+  useEffect(() => {
+    if (!shown.current) { shown.current = true; return; }
+    if (pane === "chat") focusWhenShown(".pane .composer textarea");
+  }, [pane, drawer]);
   // Opened without a section: pin the chosen one into the URL first. Otherwise marking it read would
   // make the next one "first unread", and so on down the module.
   useEffect(() => {
@@ -257,8 +290,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
       <aside className={`pane ${resizing ? "is-resizing" : ""}`} style={paneW ? { width: paneW } : undefined}>
         <div className="pane-resizer" onPointerDown={startResize} title="Drag to resize" />
         <div className="pane-tabs">
-          <button aria-pressed={pane === "notes"} onClick={() => setPane("notes")}>Notes</button>
-          <button aria-pressed={pane === "chat"} onClick={() => setPane("chat")}>Chat</button>
+          <button aria-pressed={pane === "notes"} onClick={() => setPane("notes")} title={`Notes (${MOD}1)`} aria-keyshortcuts="Meta+1 Control+1">Notes</button>
+          <button aria-pressed={pane === "chat"} onClick={() => setPane("chat")} title={`Chat (${MOD}2)`} aria-keyshortcuts="Meta+2 Control+2">Chat</button>
           <button className="pane-close" aria-label="Close" onClick={() => setDrawer(null)}>×</button>
         </div>
         <div className="pane-body" hidden={pane !== "notes"}>
