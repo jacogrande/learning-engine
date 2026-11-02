@@ -40,7 +40,9 @@ export const state = {
   chat: (id: string) => {
     const c = db.query("SELECT id, course, doc, kind, module, context, title, created_at createdAt, updated_at updatedAt FROM chats WHERE id=?").get(id) as any;
     if (!c) return;
-    c.messages = db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(id);
+    // `actions`: what an assistant turn did in the app (flashcards, vocab, a lesson), with how to undo it.
+    c.messages = (db.query("SELECT id, role, content, actions, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(id) as any[])
+      .map(({ actions, ...m }) => (actions ? { ...m, actions: JSON.parse(actions) } : m));
     save(file("chats", id), c);
   },
   chatDeleted: (id: string) => remove(file("chats", id)),
@@ -120,7 +122,7 @@ export function rebuild() {
               ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, module=excluded.module, context=excluded.context, title=excluded.title, updated_at=excluded.updated_at`,
         [c.id, c.course, c.doc, c.kind ?? "section", c.module ?? null, c.context ?? null, c.title ?? null, c.createdAt, c.updatedAt ?? c.createdAt]);
       for (const m of c.messages ?? [])
-        db.run("INSERT OR IGNORE INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [m.id, c.id, m.role, m.content, m.createdAt]);
+        db.run("INSERT OR IGNORE INTO messages (id, chat, role, content, actions, created_at) VALUES (?,?,?,?,?,?)", [m.id, c.id, m.role, m.content, m.actions ? JSON.stringify(m.actions) : null, m.createdAt]);
     }
     for (const r of db.query("SELECT id FROM chats").all() as any[]) if (!chats.has(r.id)) db.run("DELETE FROM chats WHERE id=?", [r.id]);
   });

@@ -16,9 +16,11 @@ export type PastAnswer = { answer: string; result: Result | null; note: string |
 export type Answer = { question: string; answer: string; result: Result | null; note: string | null; job: string | null; confidence?: number | null; gradedAt: string | null; history?: PastAnswer[]; failed?: boolean };   // failed: the grader did not answer; check again
 export type Annotation = { id: string; doc: string; quote: string; prefix: string; suffix: string; createdAt: string };
 export type Chat = { id: string; doc: string; kind?: "section" | "summary"; module?: string | null; context: string | null; title: string; createdAt: string; updatedAt?: string; messages?: number };
-export type Message = { id: string; role: "user" | "assistant"; content: string };
+// What an assistant turn did in the app, when the learner asked (see server/actions.ts).
+export type ChatAction = { type: "cards" | "vocab" | "lesson"; ok: boolean; text: string; to?: string | null; job?: string; undo?: unknown; undone?: boolean };
+export type Message = { id: string; role: "user" | "assistant"; content: string; actions?: ChatAction[] };
 export type SyncStatus = { repo: boolean; remote: string | null; branch: string | null; busy: string | null; dirty: boolean; lastPull: string | null; lastPush: string | null; error: string | null };
-export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
+export type Job = { id: string; course: string; kind: "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson"; ref?: string; status: string; activity?: string; startedAt?: string; error?: string };
 
 export const get = <T,>(url: string) => fetch(url).then((r) => (r.ok ? (r.json() as Promise<T>) : Promise.reject(r.status)));
 const send = (method: string) => <T,>(url: string, body?: unknown) =>

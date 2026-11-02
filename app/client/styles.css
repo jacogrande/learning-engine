@@ -349,6 +349,8 @@ article img, .mermaid svg { max-width: 100%; }
 .msg-user { align-self: flex-end; max-width: 90%; padding: var(--s-2) var(--s-3); background: var(--code); border-radius: var(--radius-3) var(--radius-3) var(--radius-1) var(--radius-3); white-space: pre-wrap; }
 .msg-assistant p { margin: 0 0 var(--s-2); } .msg-assistant > :last-child { margin-bottom: 0; }
 .chat-context { margin: 0; padding-left: var(--s-2); border-left: var(--rule) solid var(--accent); color: var(--muted); font-size: var(--fs-small); line-height: var(--lh-small); display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.chat-action { margin: var(--s-2) 0 0; padding: var(--s-2) var(--s-3); border-left: var(--rule) solid var(--accent-fill); background: var(--hover); font-size: var(--fs-small); }
+.chat-action.is-bad { border-left-color: var(--bad); }
 .composer { display: flex; flex-direction: column; gap: var(--s-2); flex: none; }
 .composer textarea { font-size: var(--fs-ui); resize: none; }
 .composer button { align-self: flex-end; }

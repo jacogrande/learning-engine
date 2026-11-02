@@ -9,7 +9,7 @@ import { ROOT } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
-export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab";
+export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson";
 type Lane = "heavy" | "light" | "background";
 const LANES: Lane[] = ["heavy", "light", "background"];
 export type Job = {
@@ -21,12 +21,12 @@ type Opts = {
   ref?: string; schema?: object; resume?: string;
   system?: string;                                   // --append-system-prompt: invariants that must survive --resume
   stream?: (text: string, reset?: boolean) => void;   // text deltas, for chat; reset at each new assistant turn
-  then?: (result: unknown, job: Job) => void;
+  then?: (result: unknown, job: Job) => unknown;   // may be async; a rejection fails nothing else
   fail?: (job: Job) => void;
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background" };
+const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background", lesson: "heavy" };
 const TOOLS: Record<JobKind, string> = {
   start: "Read,Glob,Write,Agent,WebSearch,WebFetch",
   assess: "Read,Glob,Write",
@@ -40,8 +40,9 @@ const TOOLS: Record<JobKind, string> = {
   chat: "Read,Glob,Grep",
   variant: "Read",
   vocab: "Read",
+  lesson: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch",
 };
-const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true };
+const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true };
 
 const LOG_DIR = join(ROOT, "data/jobs");
 mkdirSync(LOG_DIR, { recursive: true });
@@ -100,8 +101,9 @@ export const cancelFor = (course: string, ref: string) => { for (const j of live
 const pub = ({ _prompt, _opts, ...j }: any): Job => j;
 
 // A callback that throws must fail its own job, never the lane or the server.
-function settle(job: Queued, fn: (() => void) | undefined) {
-  try { fn?.(); } catch (e) { log(job.id, `! callback: ${(e as Error).message}`); console.warn(`job ${job.id} (${job.kind}) callback:`, (e as Error).message); }
+function settle(job: Queued, fn: (() => unknown) | undefined) {
+  const warn = (e: unknown) => { log(job.id, `! callback: ${(e as Error).message}`); console.warn(`job ${job.id} (${job.kind}) callback:`, (e as Error).message); };
+  try { const r = fn?.(); if (r instanceof Promise) r.catch(warn); } catch (e) { warn(e); }
 }
 
 function finish(job: Job, status: Job["status"], extra: Partial<Job> = {}) {

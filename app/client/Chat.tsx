@@ -1,7 +1,12 @@
 // Chats scoped to one section. A new chat starts from a selection (its context) or from nothing.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { del, get, post, put, useEvent, useLive, useJobs, type Chat as ChatRow, type Message } from "./api";
+import { del, get, post, put, useEvent, useLive, useJobs, type Chat as ChatRow, type ChatAction, type Message } from "./api";
 import { Markdown } from "./Markdown";
+import { Link } from "./App";
+
+// While a reply streams, hide an ```action block the tutor is still writing: the server acts on it
+// and the outcome shows under the message instead.
+const visible = (s: string) => s.replace(/```action[\s\S]*$/, "").trimEnd();
 
 export function ChatPane({ slug, doc, draft, onDraftUsed, open }: { slug: string; doc: string; draft: string | null; onDraftUsed: () => void; open?: string | null }) {
   const { data: chats, reload } = useLive<ChatRow[]>(`/api/courses/${slug}/chats?doc=${encodeURIComponent(doc)}`);
@@ -50,7 +55,7 @@ export function Thread({ id, onBack, onTurns, hideContext, readOnly }: { id: str
   const [chat, setChat] = useState<ChatRow | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [pending, setPending] = useState<string | null>(null);   // assistant text streaming in
-  const end = useRef<HTMLDivElement>(null);
+  const thread = useRef<HTMLDivElement>(null);
   const jobs = useJobs();
   const replying = jobs.some((j) => j.kind === "chat" && j.ref === id);
 
@@ -63,19 +68,45 @@ export function Thread({ id, onBack, onTurns, hideContext, readOnly }: { id: str
     else if (ev.reset) setPending("");
     else setPending((p) => (p ?? "") + ev.delta);
   }, [id]));
-  useEffect(() => { if (!readOnly) end.current?.scrollIntoView({ block: "end" }); onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
+  // Follow the newest message inside the thread's own scroll box. Not scrollIntoView: it also scrolls
+  // the page, so sending a message would move the lesson the learner was reading.
+  useEffect(() => { const t = thread.current; if (!readOnly && t) t.scrollTop = t.scrollHeight; onTurns?.(messages.filter((m) => m.role === "assistant").length); }, [messages, pending]);
 
   return (
     <div className="chat">
       {onBack && <button className="link" onClick={onBack}>← All chats</button>}
       {chat?.context && !hideContext && <blockquote className="chat-context">{chat.context}</blockquote>}
-      <div className="chat-thread">
-        {messages.map((m) => <div key={m.id} className={`msg msg-${m.role}`}>{m.role === "assistant" ? <Markdown body={m.content} /> : m.content}</div>)}
-        {pending !== null && <div className="msg msg-assistant">{pending ? <Markdown body={pending} /> : <span className="muted">Thinking…</span>}</div>}
-        <div ref={end} />
+      <div className="chat-thread" ref={thread}>
+        {messages.map((m) => (
+          <div key={m.id} className={`msg msg-${m.role}`}>
+            {m.role === "assistant" ? <Markdown body={m.content} /> : m.content}
+            {m.actions?.map((a, k) => <ActionResult key={k} chat={id} message={m.id} k={k} a={a} onChange={(actions) => setMessages((ms) => ms.map((x) => (x.id === m.id ? { ...x, actions } : x)))} />)}
+          </div>
+        ))}
+        {pending !== null && <div className="msg msg-assistant">{visible(pending) ? <Markdown body={visible(pending)} /> : <span className="muted">Thinking…</span>}</div>}
       </div>
       {!readOnly && <Composer placeholder="Reply" disabled={pending !== null} onSend={async (content) => { setMessages((m) => [...m, { id: "tmp" + Date.now(), role: "user", content }]); setPending(""); await post(`/api/chats/${id}/messages`, { content }); }} />}
     </div>
+  );
+}
+
+// What a turn did: a line with a link, and Undo for flashcards and new words.
+function ActionResult({ chat, message, k, a, onChange }: { chat: string; message: string; k: number; a: ChatAction; onChange: (actions: ChatAction[]) => void }) {
+  const [busy, setBusy] = useState(false);
+  const undo = async () => {
+    setBusy(true);
+    try { const r = await post<{ actions: ChatAction[] }>(`/api/chats/${chat}/messages/${message}/actions/${k}/undo`); onChange(r.actions); }
+    catch { alert("That did not undo. Try again."); }
+    setBusy(false);
+  };
+  return (
+    <p className={`chat-action ${a.ok ? "" : "is-bad"}`} role="status">
+      <span>{a.undone ? <s>{a.text}</s> : a.text}</span>
+      {a.undone ? <span className="muted"> Undone.</span> : <>
+        {a.ok && a.to && <> <Link to={a.to}>Open</Link></>}
+        {a.ok && !!a.undo && <> · <button className="link" disabled={busy} onClick={undo}>Undo</button></>}
+      </>}
+    </p>
   );
 }
 

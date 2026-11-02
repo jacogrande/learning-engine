@@ -10,6 +10,7 @@ import { state, migrate, rebuild } from "./server/state";
 import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
+import { ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const q = (req: Request, key: string) => new URL(req.url).searchParams.get(key) ?? "";
@@ -94,15 +95,19 @@ function sendChat(chat: any, content: string, record = true) {
   }
   let text = "";
   enqueue(chat.course, "chat", prompt, {
-    ref: chat.id, resume: chat.session_id ?? undefined, system: TUTOR_SYSTEM,
+    // Section chats can act in the app when asked (flashcards, vocab, a lesson); the wrap-up discussion cannot.
+    ref: chat.id, resume: chat.session_id ?? undefined, system: chat.kind === "summary" ? TUTOR_SYSTEM : `${TUTOR_SYSTEM}\n\n${ACTIONS_SYSTEM}`,
     stream: (delta, reset) => { if (reset) { text = ""; broadcast({ type: "chat", chat: chat.id, reset: true }); } else { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); } },
-    then: (result, job) => {
-      const reply = typeof result === "string" && result.trim() ? result : text;
+    then: async (result, job) => {
+      const raw = typeof result === "string" && result.trim() ? result : text;
+      const { text: reply, actions } = chat.kind === "summary" ? { text: raw, actions: [] } : parseActions(raw);
+      const transcript = (db.query("SELECT role, content FROM messages WHERE chat=? ORDER BY created_at").all(chat.id) as any[]).map((m) => `${m.role === "user" ? "Learner" : "Tutor"}: ${m.content}`).join("\n\n");
+      const outcomes = actions.length ? await runActions(chat, actions, `${transcript}\n\nTutor: ${reply}`) : [];
       const aid = id();
-      db.run("INSERT INTO messages (id, chat, role, content, created_at) VALUES (?,?,?,?,?)", [aid, chat.id, "assistant", reply, now()]);
+      db.run("INSERT INTO messages (id, chat, role, content, actions, created_at) VALUES (?,?,?,?,?,?)", [aid, chat.id, "assistant", reply || "Done.", outcomes.length ? JSON.stringify(outcomes) : null, now()]);
       db.run("UPDATE chats SET session_id=COALESCE(session_id, ?), updated_at=? WHERE id=?", [job.sessionId ?? null, now(), chat.id]);
       state.chat(chat.id);
-      broadcast({ type: "chat", chat: chat.id, done: true, message: { id: aid, role: "assistant", content: reply } });
+      broadcast({ type: "chat", chat: chat.id, done: true, message: { id: aid, role: "assistant", content: reply || "Done.", actions: outcomes.length ? outcomes : undefined } });
     },
     fail: () => {
       // A resumed session that no longer exists here (other machine, pruned): retry fresh once.
@@ -120,7 +125,8 @@ function sendChat(chat: any, content: string, record = true) {
 }
 const chatWithMessages = (cid: string) => ({
   chat: db.query("SELECT id, course, doc, kind, module, context, title, created_at createdAt FROM chats WHERE id=?").get(cid),
-  messages: db.query("SELECT id, role, content, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(cid),
+  messages: (db.query("SELECT id, role, content, actions, created_at createdAt FROM messages WHERE chat=? ORDER BY created_at").all(cid) as any[])
+    .map(({ actions, ...m }) => (actions ? { ...m, actions: JSON.parse(actions) } : m)),
 });
 
 // After a generation job: parse every quiz block the way the renderer does and report what the
@@ -413,6 +419,19 @@ Bun.serve({
         if (!chat) return json({ error: "not found" }, 404);
         const { content } = (await req.json()) as { content: string };
         return json(sendChat(chat, content));
+      },
+    },
+    // Undo something a chat turn did (flashcards made, words added). Lessons are not undone here.
+    "/api/chats/:id/messages/:mid/actions/:k/undo": {
+      POST: async (req) => {
+        const m = db.query("SELECT m.actions, c.course FROM messages m JOIN chats c ON c.id=m.chat WHERE m.id=? AND m.chat=?").get(req.params.mid, req.params.id) as any;
+        const outcomes: Outcome[] | null = m?.actions ? JSON.parse(m.actions) : null;
+        const o = outcomes?.[Number(req.params.k)];
+        if (!o) return json({ error: "not found" }, 404);
+        await undoAction(o, m.course);
+        db.run("UPDATE messages SET actions=? WHERE id=?", [JSON.stringify(outcomes), req.params.mid]);
+        state.chat(req.params.id);
+        return json({ actions: outcomes });
       },
     },
 

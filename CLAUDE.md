@@ -18,6 +18,7 @@ library/content/courses/<slug>/
     quiz.md                      # module test
     understanding.md             # what the learner has, written at wrap-up; later modules read it
     drilldowns/, readings/       # generated from selections
+    flashcards/                  # quiz blocks a chat made on request; review cards only, not sections
 ```
 
 Objectives live in `outline.md`. Their ids are positional: the second objective of module `03-foo` is `obj-03-2`. Skill arguments arrive as `$ARGUMENTS`, space-separated, in the order the skill names them.
