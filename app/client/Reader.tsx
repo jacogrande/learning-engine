@@ -31,10 +31,11 @@ const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 
 export function Reader({ slug, moduleId, file }: { slug: string; moduleId: string; file?: string }) {
   const { data: course, error: courseError } = useLive<Course>(`/api/courses/${slug}`);
-  const { data: progress } = useLive<{ read?: Record<string, string>; completedAt?: string }>(`/api/courses/${slug}/progress/${moduleId}`, ["progress"]);
+  // `read`: sections opened (seen). `done`: sections whose questions are all answered.
+  const { data: progress, reload: reloadProgress } = useLive<{ read?: Record<string, string>; done?: Record<string, boolean>; completedAt?: string }>(`/api/courses/${slug}/progress/${moduleId}`, ["progress", "answer"]);
   const mod = course?.modules.find((m) => m.id === moduleId);
-  // No section in the URL: the first one not yet read (the first, once all are), after progress loads.
-  const current = file ?? (progress ? (mod?.sections.find((s) => !progress.read?.[s.file]) ?? mod?.sections[0])?.file : undefined);
+  // No section in the URL: the first one not done (the first, once all are), after progress loads.
+  const current = file ?? (progress ? (mod?.sections.find((s) => !progress.done?.[s.file]) ?? mod?.sections[0])?.file : undefined);
   const isWrap = current === "wrap", isTest = current === "test";
   const docFile = isTest ? "quiz.md" : isWrap ? null : current;
   const docPath = docFile ? `modules/${moduleId}/${docFile}` : null;
@@ -145,8 +146,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const saved = Object.fromEntries((answers ?? []).map((a) => [a.question, a]));
   const submit = useCallback((spec: QuizSpec, answer: string, confidence: number) => {
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
-    post(`/api/courses/${slug}/answers`, { question: spec.id, doc: docPath, answer, type: spec.type, result, confidence }).then(reloadAnswers);
-  }, [slug, docPath, reloadAnswers]);
+    post(`/api/courses/${slug}/answers`, { question: spec.id, doc: docPath, answer, type: spec.type, result, confidence }).then(() => { reloadAnswers(); reloadProgress(); });   // answering may finish the section
+  }, [slug, docPath, reloadAnswers, reloadProgress]);
 
   const crumbs = [{ label: "Courses", to: "/" }, { label: course?.title ?? slug, to: `/c/${slug}` }];
   if (courseError) return <NotFound crumbs={[{ label: "Courses", to: "/" }]} what="course" />;
@@ -167,7 +168,8 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const title = isTest ? "Module test" : (doc?.frontmatter.title ?? sections[i]?.title ?? extra?.title ?? "");
   const testRunning = jobs.some((j) => j.course === slug && j.ref === `${moduleId}/test`);
   const afterSections = mod.test ? { to: `${here}/test`, label: "Module test" } : { to: `${here}/wrap`, label: "Wrap up" };
-  const read = (f: string) => !!progress?.read?.[f];
+  // Done (every question answered) shows a tick; opened but not done shows an eye.
+  const mark = (f: string) => (progress?.done?.[f] ? "is-done" : progress?.read?.[f] ? "is-seen" : "");
 
   const act = (what: "note" | "drill" | "reading" | "chat" | "vocab") => {
     if (!sel || !docPath) return;
@@ -207,7 +209,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
             const subs = mod.extras.filter((e) => e.section === s.file);
             return (
               <li key={s.file}>
-                <Link to={`${here}/${s.file}`} className={`${s.file === current ? "active" : ""} ${read(s.file) ? "is-read" : ""}`}>{s.title}</Link>
+                <Link to={`${here}/${s.file}`} className={`${s.file === current ? "active" : ""} ${mark(s.file)}`} title={progress?.done?.[s.file] ? "Done: every question answered" : progress?.read?.[s.file] ? "Seen: questions still to answer" : undefined}>{s.title}</Link>
                 {subs.length > 0 && <ul className="side-extras">{subs.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`} className={e.file === current ? "active" : ""}><span className="tag">{e.kind === "drilldown" ? "↓" : "≡"}</span>{e.title}</Link></li>)}</ul>}
               </li>
             );

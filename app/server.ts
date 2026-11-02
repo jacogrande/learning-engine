@@ -152,15 +152,31 @@ function saveProgress(course: string, mod: string, patch: Record<string, any>) {
 // A card exists and has at least one review in its log (dummy cards have none).
 const cardReviewed = (course: string, qid: string) => ((db.query("SELECT log FROM cards WHERE course=? AND question=?").get(course, qid) as any)?.log ?? "[]") !== "[]";
 
-// Where to pick a course up: the first generated module not yet finished, at its first unread
-// section (or its test or wrap-up once every section is read). Null when nothing generated is open.
-function resumeOf(c: Course) {
+// A section is done when every question in it has an answer. Opening it only makes it seen (`read`,
+// kept under its old name). A section with no questions is done once seen.
+async function doneSections(c: Course | null, mod: string, p: { read?: Record<string, string> }) {
+  const m = c?.modules.find((x) => x.id === mod);
+  if (!c || !m) return {} as Record<string, boolean>;
+  const answered = new Set((db.query("SELECT question FROM answers WHERE course=? AND doc LIKE ? AND answer<>''").all(c.slug, `modules/${mod}/%`) as any[]).map((r) => r.question));
+  const done: Record<string, boolean> = {};
+  for (const s of m.sections) {
+    const d = await getDoc(c.slug, `modules/${mod}/${s.file}`);
+    const ids = [...(d?.body.matchAll(/```quiz\n([\s\S]*?)```/g) ?? [])].map((f) => /^id:\s*(\S+)/m.exec(f[1])?.[1]).filter(Boolean) as string[];
+    done[s.file] = ids.length ? ids.every((q) => answered.has(q)) : !!p.read?.[s.file];
+  }
+  return done;
+}
+
+// Where to pick a course up: the first generated module not yet finished, at its first section not
+// done (or its test or wrap-up once every section is). Null when nothing generated is open.
+async function resumeOf(c: Course) {
   const done = c.modules.filter((m) => progressOf(c.slug, m.id).completedAt).length;
   for (const m of c.modules) {
     const p = progressOf(c.slug, m.id);
     if (p.completedAt) continue;
     if (m.status !== "ready") return { done, resume: null, nextToGenerate: m.id };
-    const unread = m.sections.find((s) => !p.read?.[s.file]);
+    const finished = await doneSections(c, m.id, p);
+    const unread = m.sections.find((s) => !finished[s.file]);
     const target = unread ? { file: unread.file, title: unread.title } : m.test && !p.summary ? { file: "test", title: "Module test" } : { file: "wrap", title: "Wrap up" };
     return { done, resume: { module: m.id, moduleTitle: m.title, ...target }, nextToGenerate: null };
   }
@@ -261,7 +277,7 @@ Bun.serve({
   routes: {
     "/api/events": (req) => sse(req),
     "/api/courses": {
-      GET: async () => json((await listCourses()).map((c) => ({ ...c, progress: resumeOf(c) }))),
+      GET: async () => json(await Promise.all((await listCourses()).map(async (c) => ({ ...c, progress: await resumeOf(c) })))),
       // New course from the app: the clarifying answers come with the request, so the skill skips its questions.
       POST: async (req) => {
         const b = (await req.json()) as { subject: string; depth?: string; know?: string; goals?: string; produce?: string; angle?: string };
@@ -453,7 +469,8 @@ Bun.serve({
     // --- phase 3: progress, module test, wrap-up, review ----------------
     "/api/courses/:slug/question": async (req) => { const spec = await question(req.params.slug, q(req, "doc"), q(req, "id")); return spec ? json(spec) : json({ error: "not found" }, 404); },
     "/api/courses/:slug/progress/:module": {
-      GET: (req) => json(progressOf(req.params.slug, req.params.module)),
+      // `read`: sections opened (seen). `done`: sections whose questions are all answered.
+      GET: async (req) => { const p = progressOf(req.params.slug, req.params.module); return json({ ...p, done: await doneSections(await getCourse(req.params.slug), req.params.module, p) }); },
       PUT: async (req) => { const patch = await req.json(); return json(saveProgress(req.params.slug, req.params.module, patch)); },
     },
     "/api/courses/:slug/modules/:id/test": {

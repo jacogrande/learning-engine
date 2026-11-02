@@ -21,8 +21,8 @@ function usePath() {
   return path.split("?")[0];
 }
 export function navigate(to: string) { history.pushState(null, "", to); dispatchEvent(new PopStateEvent("popstate")); }
-export const Link = ({ to, children, className }: { to: string; children: ReactNode; className?: string }) => (
-  <a href={to} className={className} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>
+export const Link = ({ to, children, className, title }: { to: string; children: ReactNode; className?: string; title?: string }) => (
+  <a href={to} className={className} title={title} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>
 );
 
 export function App() {

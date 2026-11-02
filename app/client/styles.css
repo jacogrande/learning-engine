@@ -236,6 +236,11 @@ button.link:hover { background: none; color: var(--fg); }
 .side li a:hover, .side-steps li button.link:hover { color: var(--fg); background: var(--hover); }
 .side li a.active { color: var(--fg); background: var(--hover); box-shadow: inset 3px 0 0 var(--accent-fill); font-weight: 500; }
 .side a.is-read::after { content: " ✓"; color: var(--ok); font-size: var(--fs-caption); }
+.side a.is-done::after { content: " ✓"; color: var(--ok); font-size: var(--fs-caption); }
+/* Seen, not done: an eye, drawn as a mask so it takes the muted text colour in every theme. */
+.side a.is-seen::after { content: ""; display: inline-block; width: 13px; height: 13px; margin-left: 5px; vertical-align: -1px; background: var(--muted);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.4 3 1.7 5.6.8 8c.9 2.4 3.6 5 7.2 5s6.3-2.6 7.2-5C14.3 5.6 11.6 3 8 3zm0 8.2A3.2 3.2 0 1 1 8 4.8a3.2 3.2 0 0 1 0 6.4zM8 6.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z'/%3E%3C/svg%3E") center / contain no-repeat;
+          mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 3C4.4 3 1.7 5.6.8 8c.9 2.4 3.6 5 7.2 5s6.3-2.6 7.2-5C14.3 5.6 11.6 3 8 3zm0 8.2A3.2 3.2 0 1 1 8 4.8a3.2 3.2 0 0 1 0 6.4zM8 6.4a1.6 1.6 0 1 0 0 3.2 1.6 1.6 0 0 0 0-3.2z'/%3E%3C/svg%3E") center / contain no-repeat; }
 .side-extras { padding-left: var(--s-3); }
 .side .side-extras a { display: flex; gap: var(--s-1); font-size: var(--fs-small); }
 .side .side-extras .tag { display: inline; flex: none; width: 1.1em; padding: 0; opacity: .6; }
