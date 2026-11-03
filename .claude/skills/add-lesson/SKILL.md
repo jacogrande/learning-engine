@@ -2,7 +2,7 @@
 name: add-lesson
 description: Write one new section in an existing module, on a topic the learner asked for in a chat.
 argument-hint: "<slug> <module-id>"
-allowed-tools: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch"
+allowed-tools: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,Bash"
 disable-model-invocation: true
 ---
 

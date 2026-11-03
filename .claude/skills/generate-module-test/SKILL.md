@@ -2,7 +2,7 @@
 name: generate-module-test
 description: Write the end-of-module test for a module whose sections exist.
 argument-hint: "<slug> <module-id>"
-allowed-tools: "Read,Glob,Write"
+allowed-tools: "Read,Glob,Write,Bash"
 disable-model-invocation: true
 ---
 
@@ -19,7 +19,7 @@ title: "Module test"
 One sentence: what this test covers, that earlier ideas return on purpose, and that it is harder than the section checks because recall under difficulty is what lasts.
 ```
 
-Then 6–10 `quiz` blocks, no prose between them, ids `q-NN-t01`, `q-NN-t02`…, every block with `objective:`:
+Then 6–10 `quiz` blocks, no prose between them except a score a question refers to (music courses: the `abc` block and one line naming it, just before its question, never inside the block), ids `q-NN-t01`, `q-NN-t02`…, every block with `objective:`:
 
 - **One transfer question per objective**, from the test plan's case: a situation no section used. Recall alone does not show mastery.
 - **One discrimination question per confusable pair** the module introduced; distractors from the research files' misconceptions and from `learner.md` `errors`.

@@ -4,6 +4,8 @@ Date: 2026-11-02. The reader can now engrave staff notation from a fenced block,
 
 *Updated 2026-11-02 after a code review of `4c7b494`: the sections below describe the code as fixed, not as first committed.*
 
+*Updated 2026-11-03: generation now follows this workflow. `.claude/skills/transcribe/SKILL.md` is the transcription procedure (published transcription, notes read off the page and checked against the harmony, timestamp from two sources, guitar parts in `clef=treble-8`); `module-researcher` follows it for each objective's strongest recorded example, and `generate-module` has a Music section (every line as a score, at least half the sections on a real recording, standards in their usual keys). `scripts/check-notation.ts` runs the lint's notation checks on any file and confirms each video through YouTube's oEmbed endpoint. Module and lesson jobs may run `curl`, `pdftoppm`, `uv run`, `mkdir` and that script.*
+
 ## What course authors write
 
 Two additions to the content grammar (`.claude/rules/content-grammar.md`), both plain Markdown, no HTML:

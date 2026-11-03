@@ -54,7 +54,7 @@ export async function lint(course: string, mod: string): Promise<string[]> {
 // Notation and passages, read the way the reader will: abc fences (one tune, every bar full, no parser
 // warnings), ::youtube directives (form, id, times, quoting), and fences opened inside a quiz block,
 // which end the quiz early and print its rubric as prose.
-function notation(body: string): string[] {
+export function notation(body: string): string[] {
   const out: string[] = [];
   for (const [, src] of body.matchAll(/^```abc\n([\s\S]*?)^```/gm)) {
     const before = abcSourceProblems(src);
