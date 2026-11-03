@@ -10,9 +10,10 @@ export type QuizSpec = {
   options?: string[]; answer?: number; explanation?: string; rubric?: string;
 };
 
-const Inline = ({ children }: { children: string }) => (
-  <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{children}</ReactMarkdown>
-);
+// Defined once: a new `p` component on every render would remount the text, and a reader's
+// selection inside a prompt or a grader's note would vanish when the selection menu opens.
+const unwrapP = { p: ({ children }: { children?: React.ReactNode }) => <>{children}</> };
+const Inline = ({ children }: { children: string }) => <ReactMarkdown components={unwrapP}>{children}</ReactMarkdown>;
 
 // The baseline form: each question takes an answer, how sure the learner is, and an optional note.
 export const QuizForm = createContext<{ sheet: Sheet; set: (field: keyof Sheet, id: string, v: string | number) => void } | null>(null);
