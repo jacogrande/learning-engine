@@ -128,6 +128,9 @@ function env() {
   for (const k of Object.keys(e)) if (k === "CLAUDECODE" || k === "CLAUDE_PID" || k.startsWith("CLAUDE_CODE_")) delete e[k];
   delete e.ANTHROPIC_API_KEY;
   e.CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS = "3";
+  // A print-mode run stops waiting for background subagents after 10 minutes by default and exits,
+  // which killed module research mid-transcription. Wait up to 50 minutes; Cancel still stops a run.
+  e.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = String(50 * 60_000);
   return e;
 }
 
