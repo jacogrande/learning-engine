@@ -92,6 +92,10 @@ html { -webkit-text-size-adjust: 100%; }
 body { margin: 0; color: var(--fg); background: var(--bg); font: var(--fs-body)/var(--lh-body) var(--font); -webkit-font-smoothing: antialiased; }
 a { color: inherit; }
 button, input, textarea { font: inherit; color: inherit; }
+/* Textareas grow with their text, from their `rows` up to ten lines, then scroll. Without
+   field-sizing (older Firefox, Safari) main.tsx sets the height as the learner types. */
+textarea { --rows: 2; field-sizing: content; min-height: calc(var(--rows) * 1lh + 2 * var(--s-2) + 2 * var(--hairline)); max-height: calc(10lh + 2 * var(--s-2) + 2 * var(--hairline)); overflow-y: auto; }
+textarea[rows="1"] { --rows: 1; } textarea[rows="3"] { --rows: 3; } textarea[rows="5"] { --rows: 5; }
 :focus-visible { outline: var(--rule) solid var(--accent); outline-offset: 2px; }
 .muted { color: var(--muted); } .dim { opacity: .6; } .ok { color: var(--ok); }
 .meta { font-size: var(--fs-small); line-height: var(--lh-small); color: var(--muted); margin: 0 0 var(--s-4); }
