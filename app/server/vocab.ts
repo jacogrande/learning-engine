@@ -287,7 +287,7 @@ export function vocabRating(result: Result, difficulty: number, format: Format):
   return difficulty >= 3 ? Rating.Easy : difficulty === 2 ? Rating.Good : Rating.Hard;
 }
 
-export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe; kin?: { word: string; sense: string } };
+export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe; kin?: { word: string; sense: string }; session?: string };
 type Graded = { result: Result; note: string };
 
 export function parseAttempt(b: any): Attempt | null {
@@ -295,7 +295,7 @@ export function parseAttempt(b: any): Attempt | null {
   return {
     format: b.format, mode: b.mode, answer: b.answer.slice(0, 2000), sentence: str(b.sentence), form: str(b.form),
     difficulty: Number.isInteger(b.difficulty) ? Math.min(3, Math.max(0, b.difficulty)) : 0,
-    result: isResult(b.result) ? b.result : undefined,
+    result: isResult(b.result) ? b.result : undefined, session: typeof b.session === "string" ? b.session.slice(0, 40) : undefined,
     probe: b.probe && typeof b.probe.question === "string" && typeof b.probe.answer === "string" ? { question: b.probe.question, answer: b.probe.answer } : undefined,
     kin: b.kin && typeof b.kin.word === "string" && typeof b.kin.sense === "string" ? { word: b.kin.word.slice(0, 40), sense: b.kin.sense.slice(0, 500) } : undefined,
   };
@@ -362,7 +362,7 @@ function record(wid: string, a: Attempt, g: Graded) {
   if (a.mode === "review") {
     if (!db.query("SELECT 1 FROM cards WHERE course=? AND question=?").get(VOCAB, wid)) return null;
     // Recall effort is logged as `difficulty`, never as `confidence`: it is not a calibration signal.
-    const r = rate(VOCAB, wid, `vocab/${wid}`, g.result, null, null, { answer: a.answer, note: g.note, rating: vocabRating(g.result, a.difficulty ?? 0, a.format), log: { format: a.format, sentence: a.sentence, difficulty: a.difficulty ?? 0 } });
+    const r = rate(VOCAB, wid, `vocab/${wid}`, g.result, null, null, { answer: a.answer, note: g.note, rating: vocabRating(g.result, a.difficulty ?? 0, a.format), log: { format: a.format, sentence: a.sentence, difficulty: a.difficulty ?? 0, ...(a.session ? { session: a.session } : {}) } });
     broadcast({ type: "card", course: VOCAB, question: wid });
     syncProfiles(); refreshTests(wid);
     return r;

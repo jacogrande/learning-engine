@@ -1,20 +1,22 @@
 // Review: due cards across every course (daily), or an ad hoc set (course, module, weak spots,
-// burst, cram). One card at a time, graded like a lesson; a soft cap ends the daily session and
-// "+10 more" continues. From the second review on, a card may be asked as a variant.
+// burst, cram). One card at a time, graded like a lesson. The daily review is once a day: when it
+// is done the page shows the day's result and the history until tomorrow. From the second review
+// on, a card may be asked as a variant.
 import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, put, useLive, type Answer, type Course } from "./api";
 import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell, navigate } from "./App";
 import { Markdown } from "./Markdown";
 import { DIFFICULTY, VOCAB, inDialog } from "./Vocab";
+import { History } from "./History";
 
 type Item = { course: string; courseTitle: string; question: string; doc: string; module: string | null; moduleTitle: string; sectionTitle: string; due: string; streak: number; state: string; reviews: number; sureWrong: boolean; variant: number | null; variantCount: number; original: QuizSpec; spec: QuizSpec; vocab?: { format: string; sentence: string; form: string; reveal: Reveal } };
 // The full answer to a vocab card, shown once it is graded.
 type Reveal = { sentence: string; headword: string; explanation: string; confusable: { word: string; difference: string } | null };
-type Summary = { dueCount: number; total: number; learned: number; suspended: number; seeded: number; streak: number; next: string | null };
+type Summary = { dueCount: number; doneToday: number; total: number; learned: number; suspended: number; seeded: number; streak: number; next: string | null };
 type Session = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
 type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
-type Queue = { mode: Mode; scope: string | null; items: Item[]; dueCount: number; remaining: number; topped: number; next: string | null; summary: Summary; last: Session | null };
+type Queue = { mode: Mode; scope: string | null; items: Item[]; dueCount: number; remaining: number; topped: number; next: string | null; doneToday: number; summary: Summary; last: Session | null };
 type CardStatus = { due: string; streak: number; state: string; suspended?: boolean; reviews: number; last: { result: Answer["result"]; note: string | null; confidence: number | null; variant: number | null; review: string | null } | null };
 type Saved = Answer & { due?: string; leech?: boolean };
 
@@ -38,30 +40,29 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   const [saved, setSaved] = useState<Record<string, Saved>>({});   // keyed by course:question — two courses may share question ids
   const [showOriginal, setShowOriginal] = useState(false);
   const [session, setSession] = useState<Session | null>(null);
-  const sessionRef = useRef<Session | null>(null);
-  const served = useRef<string[]>([]);
+  const sessionRef = useRef<Promise<Session> | null>(null);
   const tally = useRef({ reviewed: 0, correct: 0, sureWrong: 0, pending: new Set<string>() });
   const timers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
 
-  const load = useCallback(async (more = false) => {
+  const load = useCallback(async () => {
     const params = new URLSearchParams({ mode });
     if (scope) params.set("scope", scope);
-    if (more) { params.set("cap", "10"); params.set("exclude", served.current.join(",")); }
     const r = await get<Queue>(`/api/review?${params}`);
-    served.current.push(...r.items.map((it) => `${it.course}:${it.question}`));
-    setQ((prev) => (more && prev ? { ...r, items: [...prev.items, ...r.items] } : r));
-    if (!more) setI(0);
+    setQ(r); setI(0);
   }, [mode, scope]);
-  const restart = useCallback(() => { for (const t of Object.values(timers.current)) clearInterval(t); timers.current = {}; served.current = []; tally.current = { reviewed: 0, correct: 0, sureWrong: 0, pending: new Set() }; sessionRef.current = null; setSession(null); setSaved({}); setQ(null); load(); }, [load]);
+  const restart = useCallback(() => { for (const t of Object.values(timers.current)) clearInterval(t); timers.current = {}; tally.current = { reviewed: 0, correct: 0, sureWrong: 0, pending: new Set() }; sessionRef.current = null; setSession(null); setSaved({}); setQ(null); load(); }, [load]);
   useEffect(() => { restart(); }, [restart]);
   useEffect(() => () => { for (const t of Object.values(timers.current)) clearInterval(t); }, []);
   useEffect(() => { setShowOriginal(false); }, [i]);
 
-  // One session per visit; counts update as grades arrive.
-  const ensureSession = async (): Promise<Session> => {
-    if (sessionRef.current) return sessionRef.current;
-    const s = await post<Session>("/api/review/sessions", { kind: mode, scope: scope ?? null });
-    sessionRef.current = s; setSession(s); return s;
+  // One session per visit, created by the first answer; counts update as answers and grades arrive.
+  // The promise is kept, not the session: two calls before the first returns must not make two.
+  const ensureSession = (): Promise<Session> => {
+    if (!sessionRef.current) {
+      const p = post<Session>("/api/review/sessions", { kind: mode, scope: scope ?? null });
+      sessionRef.current = p; p.then(setSession, () => { if (sessionRef.current === p) sessionRef.current = null; });
+    }
+    return sessionRef.current;
   };
   const syncSession = async (end = false) => { const s = await ensureSession(); const t = tally.current; put(`/api/review/sessions/${s.id}`, { reviewed: t.reviewed, correct: t.correct, sureWrong: t.sureWrong, end }); };
 
@@ -81,8 +82,9 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
     const pending: Saved = { question: spec.id, answer, result: result ?? null, note: null, job: null, confidence, gradedAt: null };
     setSaved((s) => ({ ...s, [key(it)]: pending }));
-    if (it.course === VOCAB) return submitVocab(it, answer, confidence, pending);
-    const sent = post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant });
+    syncSession();   // count the answer now: the learner may leave before the grade lands
+    if (it.course === VOCAB) return void ensureSession().then((s) => submitVocab(it, answer, confidence, pending, s.id));
+    const sent = ensureSession().then((s) => post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant, session: s.id }));
     sent.then((r) => {
       if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
@@ -99,10 +101,10 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   // A vocab card goes to the vocab grader with the learner's difficulty rating. An exact fill-in is
   // rated at once; otherwise the grade is polled by job. A failed grade rates nothing and lets the
   // learner check again.
-  const submitVocab = (it: Item, answer: string, difficulty: number, pending: Saved) => {
+  const submitVocab = (it: Item, answer: string, difficulty: number, pending: Saved, session: string) => {
     const k = key(it);
     const fail = (why: string) => { clearInterval(timers.current[k]); tally.current.pending.delete(k); tally.current.reviewed--; setSaved((s) => ({ ...s, [k]: { ...pending, note: why, failed: true } })); };
-    post<{ job: string | null; result?: Answer["result"]; note?: string; review?: { due: string; leech?: boolean } | null }>(`/api/vocab/${it.question}/answer`, { format: it.vocab!.format, sentence: it.vocab!.sentence, form: it.vocab!.form, answer, difficulty, mode: "review" })
+    post<{ job: string | null; result?: Answer["result"]; note?: string; review?: { due: string; leech?: boolean } | null }>(`/api/vocab/${it.question}/answer`, { format: it.vocab!.format, sentence: it.vocab!.sentence, form: it.vocab!.form, answer, difficulty, mode: "review", session })
       .then((r) => {
         if (!r.job) return record(it, { ...pending, result: r.result ?? null, note: r.note || null, gradedAt: new Date().toISOString(), due: r.review?.due, leech: !!r.review?.leech });
         let tries = 0;
@@ -151,25 +153,29 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   );
   const title = mode === "daily" ? "Review" : `Review · ${MODE_LABEL[mode]}`;
 
-  // Finished, or nothing to do: summary and the ad hoc menu.
+  // Finished, or nothing to do: the day's result, the history, and the ad hoc menu.
   if (!item) {
     const t = tally.current;
+    const doneToday = q.doneToday > 0 || t.reviewed > 0;
+    const later = q.remaining > 0 ? ` ${q.remaining} more due ${q.remaining === 1 ? "card waits" : "cards wait"} for tomorrow.` : "";
     return (
       <Shell crumbs={crumbs} className="page">
         <h1>{title}</h1>{head}
         {t.reviewed > 0 ? (
           <div className="analysis">
             <div className="analysis-head"><span className="level">done</span><span className="muted">{t.reviewed} reviewed · {t.correct} right{t.sureWrong ? ` · ${t.sureWrong} sure-and-wrong` : ""}{t.pending.size ? ` · ${t.pending.size} still grading` : ""}</span></div>
-            <p>{mode === "daily" ? (q.remaining > 0 ? `${q.remaining} more due now.` : s.next ? `Nothing else due. Next ${relTime(s.next)}.` : "Nothing else scheduled.") : "Done with this set."}</p>
+            <p>{mode === "daily" ? `Today's review is done. The next one opens tomorrow.${later}` : "Done with this set."}{session && <> <Link to={`/review/history/${session.id}`}>See the answers and grades →</Link></>}</p>
+          </div>
+        ) : mode === "daily" && doneToday ? (
+          <div className="analysis">
+            <div className="analysis-head"><span className="level">done</span><span className="muted">{q.doneToday} reviewed today</span></div>
+            <p>Today's review is done. The next one opens tomorrow.{later}</p>
           </div>
         ) : (
           <p className="muted empty">{s.total === 0 ? "No cards yet. Answer questions in a lesson and they come back here on a schedule, or add dummy cards below." : mode === "daily" ? (s.next ? `Nothing due. Next ${relTime(s.next)}.` : "Nothing due.") : "Nothing in this set."}</p>
         )}
-        <div className="actions">
-          {mode === "daily" && q.remaining > 0 && <button className="primary" onClick={() => load(true)}>+10 more</button>}
-          {mode !== "daily" && <Link to={slug ? `/c/${slug}/review` : "/review"} className="btn">Due today</Link>}
-          {q.last && q.last.id !== session?.id && <span className="muted">Last session: {q.last.reviewed} reviewed, {q.last.correct} right · {new Date(q.last.startedAt).toLocaleDateString()}</span>}
-        </div>
+        {mode !== "daily" && <div className="actions"><Link to={slug ? `/c/${slug}/review` : "/review"} className="btn">Due today</Link></div>}
+        <History course={slug} />
         <ModeMenu courses={courses ?? []} slug={slug} current={{ mode, scope: scope ?? null }} restart={restart} />
         <div className="actions">
           <button onClick={async () => { const r = await post<{ added: number }>("/api/review/seed", { course: courseScope }); if (r.added) restart(); else alert("Every question already has a card."); }} title={`One card per quiz question in ${courseScope ? "this course's" : "your"} modules, due now, so you can try review before answering lessons`}>Add dummy cards</button>

@@ -5,6 +5,7 @@ import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
 import { ReviewPage } from "./Review";
+import { SessionPage } from "./History";
 import { StatsPage } from "./Stats";
 import { CardsPage } from "./Cards";
 import { NotebookPage } from "./Notebook";
@@ -34,6 +35,7 @@ export function App() {
     path === "/" ? <Courses />
     : path === "/review/stats" ? <StatsPage />
     : path === "/review/cards" ? <CardsPage />
+    : path.startsWith("/review/history/") ? <SessionPage id={path.slice("/review/history/".length)} />
     : path === "/vocab" ? <VocabPage />
     : path === "/vocab/train" ? <TrainPage />
     : path === "/review" ? <ReviewPage key={location.search} mode={mode} scope={scope} />

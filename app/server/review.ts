@@ -320,12 +320,21 @@ function interleave(items: QueueItem[]): QueueItem[] {
 
 export type Mode = "daily" | "course" | "module" | "weak" | "burst" | "cram";
 
-// Daily: due cards (sure-and-wrong first), interleaved, capped; topped up with the oldest
-// never-reviewed cards when fewer than 8 are due. Ad hoc modes ignore due dates; course, module and
-// cram serve the whole set, burst ten, weak spots twenty.
+// The daily review happens once per local calendar day. A card answered today (in review or in a
+// lesson) waits for tomorrow even if its schedule says it is due again in minutes; the daily cap
+// is a budget for the day, spent by every daily session started today. What is left carries over.
+const todayStart = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); };
+const dayOf = (iso: string) => { const d = new Date(iso); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
+const notToday = " AND (log='[]' OR json_extract(log, '$[#-1].review') < ?)";
+const doneToday = () => (db.query("SELECT coalesce(sum(reviewed), 0) n FROM review_sessions WHERE kind='daily' AND started_at>=?").get(todayStart()) as any).n as number;
+const dailyBudget = () => Math.max(0, getSetting("dailyCap", 20) - doneToday());
+
+// Daily: due cards not seen today (sure-and-wrong first), interleaved, within the day's budget;
+// topped up with never-reviewed cards so the day's review reaches 8. Ad hoc modes ignore due dates
+// and the day; course, module and cram serve the whole set, burst ten, weak spots twenty.
 export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; exclude?: string[] } = {}) {
   const mode = opts.mode ?? "daily";
-  const cap = opts.cap ?? (mode === "daily" ? getSetting("dailyCap", 20) : mode === "burst" ? 10 : mode === "weak" ? 20 : Infinity);
+  const cap = mode === "daily" ? dailyBudget() : opts.cap ?? (mode === "burst" ? 10 : mode === "weak" ? 20 : Infinity);
   const excl = new Set(opts.exclude ?? []);
   const key = (r: Row) => `${r.course}:${r.question}`;
   const base = "suspended=0 AND state<>'orphaned'";
@@ -334,7 +343,7 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = inCourse(); args.push(opts.scope!, opts.scope!); }
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
   if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
-  if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=? ORDER BY due`).all(...args, now()) as Row[];
+  if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=?${notToday} ORDER BY due`).all(...args, now(), todayStart()) as Row[];
   else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? inCourse() : ""} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope, opts.scope] : []), cap) as Row[];
   else if (mode === "weak") rows = (await weakRows()).filter((r) => !opts.scope || r.course === opts.scope || (r.course === VOCAB && r.module === opts.scope));
   else rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} ORDER BY due`).all(...args) as Row[];
@@ -343,18 +352,20 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   items = [...items.filter((i) => i.sureWrong), ...items.filter((i) => !i.sureWrong)];
   items = interleave(items).slice(0, cap);
   let topped = 0;
-  if (mode === "daily" && items.length < 8 && !opts.exclude?.length) {
+  const want = mode === "daily" ? Math.min(8, cap + doneToday()) - doneToday() - items.length : 0;
+  if (want > 0) {
     // Not vocab cards: a word's first review waits for the day after it was met in Train.
-    const fresh = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND course<>'${VOCAB}' AND state='new' AND due>? ORDER BY updated_at LIMIT ?`).all(...args, now(), 8 - items.length) as Row[];
+    const fresh = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND course<>'${VOCAB}' AND state='new' AND due>?${notToday} ORDER BY updated_at LIMIT ?`).all(...args, now(), todayStart(), want) as Row[];
     const extra = await resolve(fresh.filter((r) => !items.some((i) => i.course === r.course && i.question === r.question)));
     topped = extra.length; items = [...items, ...extra];
   }
-  const totalDue = mode === "daily" ? (db.query(`SELECT count(*) n FROM cards WHERE ${base}${scopeWhere} AND due<=?`).get(...args, now()) as any).n : rows.length;
+  const totalDue = mode === "daily" ? (db.query(`SELECT count(*) n FROM cards WHERE ${base}${scopeWhere} AND due<=?${notToday}`).get(...args, now(), todayStart()) as any).n : rows.length;
   const next = (db.query(`SELECT min(due) d FROM cards WHERE ${base}${scopeWhere} AND due>?`).get(...args, now()) as any).d;
   // Ask for variants in the background for cards that will be seen again, a few per load.
   let asked = 0;
   for (const it of items) if (it.course !== VOCAB && asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
-  return { mode, scope: opts.scope ?? null, items, dueCount: totalDue, remaining: Math.max(0, totalDue - excl.size - items.length + topped), topped, next };
+  // Daily `remaining`: due cards the day's budget leaves for tomorrow.
+  return { mode, scope: opts.scope ?? null, items, dueCount: totalDue, remaining: Math.max(0, totalDue - excl.size - items.length + topped), topped, next, doneToday: doneToday() };
 }
 let onVariantWanted: ((it: QueueItem) => void) | null = null;
 export const setVariantHook = (fn: (it: QueueItem) => void) => { onVariantWanted = fn; };
@@ -386,8 +397,10 @@ export function summary(course?: string) {
   const where = `suspended=0 AND state<>'orphaned'${course ? inCourse() : ""}`;
   const args = course ? [course, course] : [];
   const by = (sql: string) => (db.query(sql).get(...args) as any).n;
+  // `dueCount` is what today's review still holds: due, not seen today, within the day's budget.
   return {
-    dueCount: by(`SELECT count(*) n FROM cards WHERE ${where} AND due<='${now()}'`),
+    dueCount: Math.min(dailyBudget(), by(`SELECT count(*) n FROM cards WHERE ${where} AND due<='${now()}' AND (log='[]' OR json_extract(log, '$[#-1].review') < '${todayStart()}')`)),
+    doneToday: doneToday(),
     total: by(`SELECT count(*) n FROM cards WHERE ${where}`),
     learned: by(`SELECT count(*) n FROM cards WHERE ${where} AND state='learned'`),
     suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? inCourse() : ""}`),
@@ -397,13 +410,12 @@ export function summary(course?: string) {
   };
 }
 
-// Consecutive days (ending today or yesterday) with at least one review.
+// Consecutive local days (ending today or yesterday) with at least one review.
 function streak(): number {
-  const days = new Set((db.query("SELECT substr(started_at, 1, 10) d FROM review_sessions WHERE reviewed > 0").all() as any[]).map((r) => r.d));
+  const days = new Set((db.query("SELECT started_at FROM review_sessions WHERE reviewed > 0").all() as any[]).map((r) => dayOf(r.started_at)));
   let n = 0; const d = new Date();
-  const key = (x: Date) => x.toISOString().slice(0, 10);
-  if (!days.has(key(d))) d.setDate(d.getDate() - 1);
-  while (days.has(key(d))) { n++; d.setDate(d.getDate() - 1); }
+  if (!days.has(dayOf(d.toISOString()))) d.setDate(d.getDate() - 1);
+  while (days.has(dayOf(d.toISOString()))) { n++; d.setDate(d.getDate() - 1); }
   return n;
 }
 
@@ -423,6 +435,76 @@ export function updateSession(sid: string, patch: { reviewed?: number; correct?:
   return db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE id=?").get(sid);
 }
 export const lastSession = () => db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE reviewed>0 ORDER BY started_at DESC LIMIT 1").get();
+
+// --- history ------------------------------------------------------------------
+// A review answer's log entry carries `answer` (a lesson's first rating does not) and, since
+// sessions were tagged, `session`. Older entries are matched to the session that started before
+// them, within six hours and before the next session began (or the one that began just after).
+type Entry = { course: string; question: string; doc: string; module: string | null; review: string; result: Result | null; note?: string; confidence?: number | null; answer: string; variant?: number | null; session?: string; format?: string; sentence?: string };
+type SessionRow = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; correct: number; sureWrong: number };
+function sessionEntries(course?: string) {
+  const sessions = db.query("SELECT id, kind, scope, started_at startedAt, ended_at endedAt, reviewed, correct, sure_wrong sureWrong FROM review_sessions WHERE reviewed>0 ORDER BY started_at").all() as SessionRow[];
+  const byId = new Map(sessions.map((s) => [s.id, s]));
+  const of = new Map<string, Entry[]>(sessions.map((s) => [s.id, []]));
+  const all: Entry[] = [];
+  for (const r of db.query(`SELECT course, question, doc, module, log FROM cards${course ? inCourse().replace(" AND", " WHERE") : ""}`).all(...(course ? [course, course] : [])) as any[])
+    for (const l of JSON.parse(r.log)) if (l.review && l.answer !== undefined) all.push({ ...l, course: r.course, question: r.question, doc: r.doc, module: r.module });
+  for (const e of all) {
+    let s = e.session ? byId.get(e.session) : undefined;
+    if (!s) {
+      const i = sessions.findLastIndex((x) => x.startedAt <= e.review);
+      const c = sessions[i], nextStart = sessions[i + 1]?.startedAt;
+      if (c && +new Date(e.review) - +new Date(c.startedAt) < 6 * 36e5 && (!nextStart || e.review < nextStart)) s = c;
+      // Before tagging, a session was created when the first grade came back, so it can start just after it.
+      else if (nextStart && +new Date(nextStart) - +new Date(e.review) < 30 * 6e4) s = sessions[i + 1];
+    }
+    if (s) of.get(s.id)!.push(e);
+  }
+  return { sessions, all, of };
+}
+const tallyOf = (es: Entry[]) => es.reduce((t, e) => (e.result ? { ...t, [e.result]: (t[e.result] ?? 0) + 1 } : t), {} as Record<string, number>);
+
+// The calendar (reviews per local day, the last year) and every session, newest first.
+export function reviewHistory(course?: string) {
+  const { sessions, all, of } = sessionEntries(course);
+  const days: Record<string, { reviewed: number; correct: number }> = {};
+  for (const e of all) { const k = dayOf(e.review), d = (days[k] ??= { reviewed: 0, correct: 0 }); d.reviewed++; if (e.result === "correct") d.correct++; }
+  const list = sessions.filter((s) => !course || s.scope === course || of.get(s.id)!.length).map((s) => {
+    const es = of.get(s.id)!;
+    return { ...s, day: dayOf(s.startedAt), tally: tallyOf(es), graded: es.length, pending: course ? 0 : Math.max(0, s.reviewed - es.length) };
+  }).reverse();
+  return { streak: streak(), today: dayOf(now()), days, sessions: list };
+}
+
+// One session's answers: what was asked, what the learner wrote, and the grade.
+export async function sessionDetail(sid: string) {
+  const { of, sessions } = sessionEntries();
+  const s = sessions.find((x) => x.id === sid); if (!s) return null;
+  const es = [...of.get(sid)!].sort((a, b) => (a.review < b.review ? -1 : 1));
+  const courses = Object.fromEntries((await listCourses()).map((c) => [c.slug, c]));
+  const items = [];
+  for (const e of es) {
+    const base = { course: e.course, question: e.question, result: e.result, note: e.note ?? null, confidence: e.confidence ?? null, at: e.review, variant: e.variant ?? null };
+    if (e.course === VOCAB) {
+      const w = wordRow(e.question);
+      items.push({ ...base, courseTitle: "Vocabulary", where: w?.entry?.headword ?? w?.word ?? e.question, to: `/vocab#w-${e.question}`, prompt: e.sentence ? `${e.format ?? "Vocab"}: ${e.sentence}` : w?.entry?.headword ?? w?.word ?? "", type: "short", answer: e.answer, options: null, correct: null });
+      continue;
+    }
+    const spec = await question(e.course, e.doc, e.question);
+    const v = e.variant != null ? variantsOf(e.course, e.question)[e.variant] : undefined;
+    const c = courses[e.course], m = c?.modules.find((x) => x.id === e.module), file = e.doc.split("/").slice(2).join("/");
+    const options: string[] | null = v?.options ?? spec?.options ?? null, answerIx = v?.answer ?? spec?.answer;
+    items.push({
+      ...base, courseTitle: c?.title ?? e.course,
+      where: file === "quiz.md" ? "Module test" : (m?.sections.find((x) => x.file === file)?.title ?? m?.extras.find((x) => x.file === file)?.title ?? file),
+      to: `/c/${e.course}/m/${e.module}/${file === "quiz.md" ? "test" : file}`,
+      prompt: v?.prompt ?? spec?.prompt ?? "(This question is no longer in the course.)", type: spec?.type ?? "short",
+      answer: spec?.type === "mcq" && options ? options[Number(e.answer)] ?? e.answer : e.answer,
+      correct: spec?.type === "mcq" && options && answerIx != null ? options[answerIx] : null, options: null,
+    });
+  }
+  return { ...s, day: dayOf(s.startedAt), tally: tallyOf(es), pending: Math.max(0, s.reviewed - es.length), items };
+}
 
 // Dummy cards: one `new` card per quiz question in every generated module, due now, with an empty
 // log. The first real answer rates it like any other card; unreviewed ones can be cleared again.

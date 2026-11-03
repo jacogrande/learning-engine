@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
+import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
 import { ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
@@ -547,7 +547,9 @@ Bun.serve({
     // the lesson page keeps showing what the learner did there, graded against the wording they saw.
     "/api/review/answer": {
       POST: async (req) => {
-        const { course, question: qid, doc, answer, type, result, confidence, variant } = (await req.json()) as { course: string; question: string; doc: string; answer: string; type: "mcq" | "short"; result?: Result; confidence?: number; variant?: number | null };
+        const { course, question: qid, doc, answer, type, result, confidence, variant, session } = (await req.json()) as { course: string; question: string; doc: string; answer: string; type: "mcq" | "short"; result?: Result; confidence?: number; variant?: number | null; session?: string };
+        // The session goes into the log entry, so a grade that lands after the learner left still counts in it.
+        const log = typeof session === "string" ? { session } : undefined;
         if (!course || !qid || !doc || typeof answer !== "string") return json({ error: "course, question, doc, answer required" }, 400);
         const vi = variant ?? null, v = vi != null ? variantsOf(course, qid)[vi] ?? null : null;
         const key = `${course}:${qid}`;
@@ -555,7 +557,7 @@ Bun.serve({
           const job = gradeShort(course, doc, qid, answer, v, (g, jobId) => {
             if (pendingReviewGrades.get(key) !== jobId) return;   // a later answer superseded this one
             pendingReviewGrades.delete(key);
-            rate(course, qid, doc, g.result, confidence, vi, { answer, note: g.note });
+            rate(course, qid, doc, g.result, confidence, vi, { answer, note: g.note, log });
             broadcast({ type: "card", course, question: qid });
           });
           pendingReviewGrades.set(key, job);
@@ -563,14 +565,18 @@ Bun.serve({
         }
         if (!result) return json({ error: "result required for mcq" }, 400);
         pendingReviewGrades.delete(key);
-        const review = rate(course, qid, doc, result, confidence, vi, { answer });
+        const review = rate(course, qid, doc, result, confidence, vi, { answer, log });
         broadcast({ type: "card", course, question: qid });
         return json({ ok: true, job: null, review });
       },
     },
     "/api/review/cards/:course/:question": (req) => { const c = cardStatus(req.params.course, req.params.question); return c ? json(c) : json({ error: "not found" }, 404); },
     "/api/review/sessions": { POST: async (req) => { const { kind, scope } = (await req.json()) as { kind: string; scope?: string }; return json(startSession(kind, scope ?? null)); } },
-    "/api/review/sessions/:id": { PUT: async (req) => json(updateSession(req.params.id, await req.json())) },
+    "/api/review/sessions/:id": {
+      GET: async (req) => { const s = await sessionDetail(req.params.id); return s ? json(s) : json({ error: "not found" }, 404); },
+      PUT: async (req) => json(updateSession(req.params.id, await req.json())),
+    },
+    "/api/review/history": (req) => json(reviewHistory(new URL(req.url).searchParams.get("course") ?? undefined)),
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
     "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
     "/api/review/seed": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; const added = await seed(course); broadcast({ type: "card" }); return json({ added }); } },
