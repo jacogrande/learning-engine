@@ -10,8 +10,10 @@ export type Course = { slug: string; title: string; depth?: string; description:
 export type Doc = { frontmatter: Record<string, any>; body: string };
 export type Result = "correct" | "partial" | "wrong" | "skipped";
 export type Grade = { level: string; summary: string; strengths: string[]; gaps: string[]; questions: { id: string; result: Result; note: string }[] };
-export type Attempt = { id: string; answers: Record<string, string>; grade: Grade | null; createdAt: string };
-export type QuizState = { draft: Record<string, string> | null; attempt: Attempt | null };
+// A baseline sheet: answers, confidence (1–3) and optional notes, each keyed by question id.
+export type Sheet = { answers: Record<string, string>; confidence: Record<string, number>; notes: Record<string, string> };
+export type Attempt = Sheet & { id: string; grade: Grade | null; createdAt: string };
+export type QuizState = { draft: Sheet | null; attempt: Attempt | null };
 export type PastAnswer = { answer: string; result: Result | null; note: string | null; confidence: number | null; gradedAt: string | null };
 export type Answer = { question: string; answer: string; result: Result | null; note: string | null; job: string | null; confidence?: number | null; gradedAt: string | null; history?: PastAnswer[]; failed?: boolean };   // failed: the grader did not answer; check again
 export type Annotation = { id: string; doc: string; quote: string; prefix: string; suffix: string; createdAt: string };

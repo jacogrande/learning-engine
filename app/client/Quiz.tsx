@@ -3,7 +3,7 @@
 // confidence rating is taken before feedback — calibration is part of what the course measures).
 import { createContext, useContext, useEffect, useState } from "react";
 import ReactMarkdown from "react-markdown";
-import type { Answer, Result } from "./api";
+import type { Answer, Result, Sheet } from "./api";
 
 export type QuizSpec = {
   id: string; type: "mcq" | "short"; prompt: string; objective?: string;
@@ -14,9 +14,10 @@ const Inline = ({ children }: { children: string }) => (
   <ReactMarkdown components={{ p: ({ children }) => <>{children}</> }}>{children}</ReactMarkdown>
 );
 
-export const QuizForm = createContext<{ answers: Record<string, string>; set: (id: string, v: string) => void } | null>(null);
+// The baseline form: each question takes an answer, how sure the learner is, and an optional note.
+export const QuizForm = createContext<{ sheet: Sheet; set: (field: keyof Sheet, id: string, v: string | number) => void } | null>(null);
 export type QuestionResult = { result: Result; note: string };
-export const QuizReview = createContext<{ answers: Record<string, string>; results: Record<string, QuestionResult> } | null>(null);
+export const QuizReview = createContext<{ sheet: Sheet; results: Record<string, QuestionResult> } | null>(null);
 // `scale` replaces the confidence labels (vocab cards ask how hard the recall was instead).
 // `chat`, where a chat pane exists, opens a chat seeded with the question, the answer and its feedback.
 export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[]; chat?: (context: string) => void } | null>(null);
@@ -30,11 +31,11 @@ const feedbackContext = (spec: QuizSpec, answer: string, a: Answer) =>
 
 export function Quiz({ spec }: { spec: QuizSpec }) {
   const review = useContext(QuizReview);
-  if (review) return <Review spec={spec} answer={review.answers[spec.id]} result={review.results[spec.id]} />;
+  if (review) return <Review spec={spec} answer={review.sheet.answers[spec.id]} confidence={review.sheet.confidence[spec.id]} remark={review.sheet.notes[spec.id]} result={review.results[spec.id]} />;
   return <Live spec={spec} />;
 }
 
-function Review({ spec, answer, result }: { spec: QuizSpec; answer?: string; result?: QuestionResult }) {
+function Review({ spec, answer, confidence, remark, result }: { spec: QuizSpec; answer?: string; confidence?: number; remark?: string; result?: QuestionResult }) {
   const status = result?.result ?? (answer ? "pending" : "skipped");
   return (
     <div className={`quiz quiz-review is-${status}`}>
@@ -49,6 +50,9 @@ function Review({ spec, answer, result }: { spec: QuizSpec; answer?: string; res
         </div>
       ) : (
         <blockquote className="quiz-answer">{answer || <span className="muted">No answer</span>}</blockquote>
+      )}
+      {answer && (confidence || remark?.trim()) && (
+        <p className="quiz-remark muted">{confidence ? CONFIDENCE[confidence - 1] : ""}{confidence && remark?.trim() ? " · " : ""}{remark?.trim()}</p>
       )}
       {result?.note && <p className="quiz-explain"><Inline>{result.note}</Inline></p>}
     </div>
@@ -67,8 +71,8 @@ function Live({ spec }: { spec: QuizSpec }) {
     if (!saved || (value !== "" && value !== saved.answer)) return;
     setValue(saved.answer); setConfidence(saved.confidence ?? 0); setChecked(!saved.failed);
   }, [saved?.answer, saved?.result, saved?.note, saved?.failed]);
-  const v = form ? form.answers[spec.id] ?? "" : value;
-  const set = (x: string) => { form ? form.set(spec.id, x) : setValue(x); setChecked(false); };
+  const v = form ? form.sheet.answers[spec.id] ?? "" : value;
+  const set = (x: string) => { form ? form.set("answers", spec.id, x) : setValue(x); setChecked(false); };
 
   const correct = spec.type === "mcq" && spec.answer != null && v === String(spec.answer);
   const grading = checked && spec.type === "short" && grade && saved?.answer === v && !saved?.note && !saved?.result;
@@ -93,6 +97,16 @@ function Live({ spec }: { spec: QuizSpec }) {
         </div>
       ) : (
         <textarea rows={3} value={v} onChange={(e) => set(e.target.value)} placeholder="Your answer" />
+      )}
+      {form && (
+        <div className="quiz-actions quiz-form-extra">
+          <span className="confidence" role="group" aria-label="How sure are you?">
+            {CONFIDENCE.map((c, i) => <button key={c} type="button" aria-pressed={form.sheet.confidence[spec.id] === i + 1} onClick={() => form.set("confidence", spec.id, i + 1)}>{c}</button>)}
+          </span>
+          {v && !form.sheet.confidence[spec.id] && <span className="muted">How sure are you?</span>}
+          <textarea className="quiz-note" rows={1} value={form.sheet.notes[spec.id] ?? ""} onChange={(e) => form.set("notes", spec.id, e.target.value)}
+            placeholder="Notes on your answer (optional)" aria-label="Notes on your answer (optional)" />
+        </div>
       )}
       {!form && (
         <div className="quiz-actions">

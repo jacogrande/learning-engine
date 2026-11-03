@@ -69,7 +69,10 @@ db.run(`
 for (const [table, col, type] of [["answers", "confidence", "INTEGER"], ["chats", "kind", "TEXT NOT NULL DEFAULT 'section'"], ["chats", "module", "TEXT"],
                                   ["cards", "state", "TEXT NOT NULL DEFAULT 'new'"], ["cards", "suspended", "INTEGER NOT NULL DEFAULT 0"], ["cards", "flag", "TEXT"],
                                   ["cards", "variants", "TEXT NOT NULL DEFAULT '[]'"], ["cards", "last_variant", "INTEGER NOT NULL DEFAULT -1"],
-                                  ["cards", "leech_base", "TEXT"], ["messages", "actions", "TEXT"], ["answers", "history", "TEXT NOT NULL DEFAULT '[]'"]])
+                                  ["cards", "leech_base", "TEXT"], ["messages", "actions", "TEXT"], ["answers", "history", "TEXT NOT NULL DEFAULT '[]'"],
+                                  // baseline: per-question confidence (1–3) and the learner's optional note, as id → value maps
+                                  ["attempts", "confidence", "TEXT NOT NULL DEFAULT '{}'"], ["attempts", "notes", "TEXT NOT NULL DEFAULT '{}'"],
+                                  ["drafts", "confidence", "TEXT NOT NULL DEFAULT '{}'"], ["drafts", "notes", "TEXT NOT NULL DEFAULT '{}'"]])
   if (!(db.query(`PRAGMA table_info(${table})`).all() as any[]).some((c) => c.name === col)) db.run(`ALTER TABLE ${table} ADD COLUMN ${col} ${type}`);
 
 export const id = () => crypto.randomUUID().slice(0, 8);

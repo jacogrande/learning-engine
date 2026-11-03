@@ -47,8 +47,8 @@ export const state = {
   },
   chatDeleted: (id: string) => remove(file("chats", id)),
   attempt: (id: string) => {
-    const r = db.query("SELECT id, course, quiz, answers, grade, created_at createdAt FROM attempts WHERE id=?").get(id) as any;
-    if (r) save(file("attempts", r.course, id), { ...r, answers: JSON.parse(r.answers), grade: r.grade ? JSON.parse(r.grade) : null });
+    const r = db.query("SELECT id, course, quiz, answers, confidence, notes, grade, created_at createdAt FROM attempts WHERE id=?").get(id) as any;
+    if (r) save(file("attempts", r.course, id), { ...r, answers: JSON.parse(r.answers), confidence: JSON.parse(r.confidence), notes: JSON.parse(r.notes), grade: r.grade ? JSON.parse(r.grade) : null });
   },
   progress: (course: string, module: string) => {
     const r = db.query("SELECT course, module, data, updated_at updatedAt FROM progress WHERE course=? AND module=?").get(course, module) as any;
@@ -91,7 +91,7 @@ export function rebuild() {
     }
     for (const p of walk(join(STATE_DIR, "attempts"))) {
       const r = load(p); if (!r) continue;
-      db.run("INSERT OR REPLACE INTO attempts (id, course, quiz, answers, grade, created_at) VALUES (?,?,?,?,?,?)", [r.id, r.course, r.quiz, JSON.stringify(r.answers), r.grade ? JSON.stringify(r.grade) : null, r.createdAt]);
+      db.run("INSERT OR REPLACE INTO attempts (id, course, quiz, answers, confidence, notes, grade, created_at) VALUES (?,?,?,?,?,?,?,?)", [r.id, r.course, r.quiz, JSON.stringify(r.answers), JSON.stringify(r.confidence ?? {}), JSON.stringify(r.notes ?? {}), r.grade ? JSON.stringify(r.grade) : null, r.createdAt]);
     }
     for (const p of walk(join(STATE_DIR, "progress"))) {
       const r = load(p); if (!r) continue;

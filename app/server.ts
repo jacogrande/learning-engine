@@ -35,8 +35,8 @@ const ASSESSMENT_SCHEMA = {
 
 // Latest attempt for a quiz, plus any unsent draft.
 async function quizState(course: string, quiz: string) {
-  const a = db.query("SELECT id, answers, grade, created_at FROM attempts WHERE course=? AND quiz=? ORDER BY created_at DESC LIMIT 1").get(course, quiz) as any;
-  const d = db.query("SELECT answers FROM drafts WHERE course=? AND quiz=?").get(course, quiz) as any;
+  const a = db.query("SELECT id, answers, confidence, notes, grade, created_at FROM attempts WHERE course=? AND quiz=? ORDER BY created_at DESC LIMIT 1").get(course, quiz) as any;
+  const d = db.query("SELECT answers, confidence, notes FROM drafts WHERE course=? AND quiz=?").get(course, quiz) as any;
   const grade = a?.grade ? JSON.parse(a.grade) : null;
   // Grades recorded before per-question results existed: read them from the assessment file's table.
   if (grade && !grade.questions) {
@@ -45,13 +45,21 @@ async function quizState(course: string, quiz: string) {
       .map(([, id, result, note]) => ({ id, result, note }));
   }
   return {
-    draft: d ? JSON.parse(d.answers) : null,
-    attempt: a ? { id: a.id, answers: JSON.parse(a.answers), grade, createdAt: a.created_at } : null,
+    draft: d ? { answers: JSON.parse(d.answers), confidence: JSON.parse(d.confidence), notes: JSON.parse(d.notes) } : null,
+    attempt: a ? { id: a.id, answers: JSON.parse(a.answers), confidence: JSON.parse(a.confidence), notes: JSON.parse(a.notes), grade, createdAt: a.created_at } : null,
   };
 }
 
-function assess(slug: string, attempt: { id: string; answers: unknown }) {
-  return enqueue(slug, "assess", `/assess-baseline ${slug}\n\nLearner answers (question id → answer):\n${JSON.stringify(attempt.answers, null, 2)}`, {
+const CONFIDENCE = ["", "guessing", "fairly sure", "sure"];
+
+type Sheet = { answers: Record<string, string>; confidence?: Record<string, number>; notes?: Record<string, string> };
+function assess(slug: string, attempt: Sheet & { id: string }) {
+  // One entry per question: the answer, how sure the learner was, and their note if they left one.
+  const sheet = Object.fromEntries(Object.entries(attempt.answers).map(([q, answer]) => {
+    const c = attempt.confidence?.[q], note = attempt.notes?.[q]?.trim();
+    return [q, { answer, ...(c ? { confidence: CONFIDENCE[c] } : {}), ...(note ? { note } : {}) }];
+  }));
+  return enqueue(slug, "assess", `/assess-baseline ${slug}\n\nLearner answers (question id → answer, confidence, note):\n${JSON.stringify(sheet, null, 2)}`, {
     schema: ASSESSMENT_SCHEMA,
     then: (grade) => {
       db.run("UPDATE attempts SET grade=? WHERE id=?", [JSON.stringify(grade), attempt.id]);
@@ -305,18 +313,18 @@ Bun.serve({
     "/api/courses/:slug/quiz/:quiz": async (req) => json(await quizState(req.params.slug, req.params.quiz)),
     "/api/courses/:slug/quiz/:quiz/draft": {
       PUT: async (req) => {
-        const { answers } = (await req.json()) as { answers: unknown };
-        db.run("INSERT INTO drafts (course, quiz, answers, updated_at) VALUES (?,?,?,?) ON CONFLICT(course, quiz) DO UPDATE SET answers=excluded.answers, updated_at=excluded.updated_at",
-          [req.params.slug, req.params.quiz, JSON.stringify(answers), now()]);
+        const { answers, confidence, notes } = (await req.json()) as Sheet;
+        db.run("INSERT INTO drafts (course, quiz, answers, confidence, notes, updated_at) VALUES (?,?,?,?,?,?) ON CONFLICT(course, quiz) DO UPDATE SET answers=excluded.answers, confidence=excluded.confidence, notes=excluded.notes, updated_at=excluded.updated_at",
+          [req.params.slug, req.params.quiz, JSON.stringify(answers), JSON.stringify(confidence ?? {}), JSON.stringify(notes ?? {}), now()]);
         return json({ ok: true });
       },
     },
     "/api/courses/:slug/baseline": {
       POST: async (req) => {
         const slug = req.params.slug;
-        const { answers } = (await req.json()) as { answers: Record<string, string> };
-        const attempt = { id: id(), answers };
-        db.run("INSERT INTO attempts (id, course, quiz, answers, created_at) VALUES (?,?,?,?,?)", [attempt.id, slug, "baseline", JSON.stringify(answers), now()]);
+        const { answers, confidence = {}, notes = {} } = (await req.json()) as Sheet;
+        const attempt = { id: id(), answers, confidence, notes };
+        db.run("INSERT INTO attempts (id, course, quiz, answers, confidence, notes, created_at) VALUES (?,?,?,?,?,?,?)", [attempt.id, slug, "baseline", JSON.stringify(answers), JSON.stringify(confidence), JSON.stringify(notes), now()]);
         db.run("DELETE FROM drafts WHERE course=? AND quiz=?", [slug, "baseline"]);
         state.attempt(attempt.id);
         assess(slug, attempt);

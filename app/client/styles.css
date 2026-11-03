@@ -343,6 +343,8 @@ ul.block-note { padding-left: var(--s-6); }
 .quiz-explain { margin: var(--s-3) 0 0; padding-top: var(--s-3); border-top: var(--hairline) solid var(--faint); color: var(--muted); font-size: var(--fs-ui); line-height: var(--lh-ui); }
 .quiz-explain.hyper { color: var(--fg); border-top: 0; padding-top: 0; font-weight: 500; }
 .quiz-chat { margin: var(--s-2) 0 0; font-size: var(--fs-ui); }
+.quiz-form-extra .quiz-note { flex: 1 1 100%; font-size: var(--fs-ui); }
+.quiz-remark { margin: var(--s-2) 0 0; font-size: var(--fs-ui); white-space: pre-wrap; }
 
 /* review mode: graded, read-only */
 .quiz-review .quiz-options div { display: flex; gap: var(--s-2); align-items: baseline; padding: var(--s-1) var(--s-2); color: var(--muted); }

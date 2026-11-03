@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Grade, type Job, type SyncStatus } from "./api";
+import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Sheet, type Grade, type Job, type SyncStatus } from "./api";
 import { Markdown } from "./Markdown";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
@@ -315,39 +315,42 @@ function Baseline({ slug, state, reload }: { slug: string; state: QuizState; rel
           {!busy && <button onClick={() => post(`/api/courses/${slug}/baseline/assess`)}>Retry assessment</button>}
         </div>
       )}
-      <QuizReview value={{ answers: attempt.answers, results }}>
+      <QuizReview value={{ sheet: { answers: attempt.answers, confidence: attempt.confidence ?? {}, notes: attempt.notes ?? {} }, results }}>
         <Markdown body={doc.body.replace(/^[^\n`]+\n/, "")} />
       </QuizReview>
     </>
   );
 }
 
-function BaselineForm({ slug, doc, draft, onSubmit }: { slug: string; doc: Doc; draft: Record<string, string> | null; onSubmit: () => void }) {
-  const [answers, setAnswers] = useState<Record<string, string>>(draft ?? {});
+// Every answered question needs a confidence rating before the sheet goes in; notes are optional.
+function BaselineForm({ slug, doc, draft, onSubmit }: { slug: string; doc: Doc; draft: Sheet | null; onSubmit: () => void }) {
+  const [sheet, setSheet] = useState<Sheet>(() => ({ answers: {}, confidence: {}, notes: {}, ...draft }));
   const [saved, setSaved] = useState(true);
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined);
 
-  const update = (id: string, v: string) => {
-    const next = { ...answers, [id]: v };
-    setAnswers(next); setSaved(false);
+  const update = (field: keyof Sheet, id: string, v: string | number) => {
+    const next = { ...sheet, [field]: { ...sheet[field], [id]: v } };
+    setSheet(next); setSaved(false);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => put(`/api/courses/${slug}/quiz/baseline/draft`, { answers: next }).then(() => setSaved(true)), 400);
+    timer.current = setTimeout(() => put(`/api/courses/${slug}/quiz/baseline/draft`, next).then(() => setSaved(true)), 400);
   };
   const submit = async () => {
     clearTimeout(timer.current);
-    await put(`/api/courses/${slug}/quiz/baseline/draft`, { answers });
-    await post(`/api/courses/${slug}/baseline`, { answers });
+    await put(`/api/courses/${slug}/quiz/baseline/draft`, sheet);
+    await post(`/api/courses/${slug}/baseline`, sheet);
     onSubmit();
   };
-  const n = Object.values(answers).filter(Boolean).length;
+  const answered = Object.keys(sheet.answers).filter((id) => sheet.answers[id]);
+  const unrated = answered.filter((id) => !sheet.confidence[id]).length;
+  const n = answered.length;
   return (
     <>
-      <QuizForm value={{ answers, set: update }}>
+      <QuizForm value={{ sheet, set: update }}>
         <Markdown body={doc.body} />
       </QuizForm>
       <div className="actions">
-        <button className="primary" disabled={n === 0} onClick={submit}>Submit {n} answers</button>
-        <span className="muted">{saved ? (n ? "Draft saved" : "") : "Saving…"}</span>
+        <button className="primary" disabled={n === 0 || unrated > 0} onClick={submit}>Submit {n} answers</button>
+        <span className="muted">{unrated ? `${unrated} ${unrated === 1 ? "answer needs" : "answers need"} a rating of how sure you are` : saved ? (n ? "Draft saved" : "") : "Saving…"}</span>
       </div>
     </>
   );
