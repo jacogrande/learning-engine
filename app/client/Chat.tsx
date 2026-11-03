@@ -19,7 +19,7 @@ export function ChatPane({ slug, doc, draft, onDraftUsed, open }: { slug: string
     <div className="chat">
       <Composer
         context={draft}
-        placeholder={draft ? "Ask about the selected passage" : "Ask about this section"}
+        placeholder={draft ? (draft.startsWith("Question: ") ? "Ask about this feedback" : "Ask about the selected passage") : "Ask about this section"}
         onSend={async (message) => {
           const { chat } = await post<{ chat: ChatRow }>(`/api/courses/${slug}/chats`, { doc, context: draft ?? undefined, message });
           onDraftUsed(); setActive(chat.id);

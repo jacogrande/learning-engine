@@ -299,7 +299,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
                 <p>Every question is answered. The wrap-up asks you to explain the module from memory, then discuss it.</p>
               </div>
             )}
-            <QuizGrade value={{ saved, submit }}>
+            <QuizGrade value={{ saved, submit, chat: (context) => { setChatDraft(context); openPane("chat"); } }}>
               <Markdown body={doc.body} />
             </QuizGrade>
             {(isSection || extra?.kind === "worksheet") && <Practice slug={slug} here={here} section={isSection ? current! : extra!.section ?? ""} mod={mod} writing={jobs.some((j) => j.kind === "worksheet" && j.ref === `modules/${moduleId}/${isSection ? current : extra?.section}`)} />}

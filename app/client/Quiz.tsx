@@ -18,9 +18,15 @@ export const QuizForm = createContext<{ answers: Record<string, string>; set: (i
 export type QuestionResult = { result: Result; note: string };
 export const QuizReview = createContext<{ answers: Record<string, string>; results: Record<string, QuestionResult> } | null>(null);
 // `scale` replaces the confidence labels (vocab cards ask how hard the recall was instead).
-export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[] } | null>(null);
+// `chat`, where a chat pane exists, opens a chat seeded with the question, the answer and its feedback.
+export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[]; chat?: (context: string) => void } | null>(null);
 
 const CONFIDENCE = ["Guessing", "Fairly sure", "Sure"];
+
+// The chat context for a graded answer. The server recognises the leading "Question: " and tells the
+// tutor this is feedback to discuss, not a selected passage.
+const feedbackContext = (spec: QuizSpec, answer: string, a: Answer) =>
+  `Question: ${spec.prompt.trim()}\n\nMy answer: ${answer.trim()}\n\nFeedback${a.result ? ` (${a.result})` : ""}: ${a.note!.trim()}`;
 
 export function Quiz({ spec }: { spec: QuizSpec }) {
   const review = useContext(QuizReview);
@@ -102,7 +108,10 @@ function Live({ spec }: { spec: QuizSpec }) {
       {sureAndWrong && <p className="quiz-explain hyper">You were sure. Errors held with confidence are the ones that stick once corrected — read the note below slowly.</p>}
       {checked && !form && spec.type === "mcq" && spec.explanation && <p className="quiz-explain"><Inline>{spec.explanation}</Inline></p>}
       {checked && !form && spec.type === "short" && (
-        grade ? (saved?.note && saved.answer === v ? <p className="quiz-explain"><Inline>{saved.note}</Inline></p> : null)
+        grade ? (saved?.note && saved.answer === v ? <>
+                  <p className="quiz-explain"><Inline>{saved.note}</Inline></p>
+                  {grade.chat && <p className="quiz-chat"><button className="link" onClick={() => grade.chat!(feedbackContext(spec, v, saved))}>Chat about this</button></p>}
+                </> : null)
               : spec.rubric ? <p className="quiz-explain"><Inline>{spec.rubric}</Inline></p> : null
       )}
       {!form && saved?.history && saved.history.length > 0 && (

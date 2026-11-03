@@ -79,7 +79,7 @@ function sendChat(chat: any, content: string, record = true) {
   const tag = chat.kind === "summary" ? `[Exchange ${turn} of 5] ` : `[Exchange ${turn}] `;
   const opener = chat.kind === "summary"
     ? `/socratic ${chat.course} ${chat.module}\n\n${chat.context ? `${chat.context}\n\n` : ""}`
-    : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `Selected passage:\n${quoteBlock(chat.context)}\n\n` : ""}`;
+    : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `${chat.context.startsWith("Question: ") ? "The learner's answer to a question in this section, and the grader's feedback on it. They want to discuss the feedback" : "Selected passage"}:\n${quoteBlock(chat.context)}\n\n` : ""}`;
   let prompt: string;
   if (chat.session_id) prompt = tag + content;
   else {
