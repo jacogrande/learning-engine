@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
+import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, amendLog, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
 import { ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
@@ -269,6 +269,40 @@ function gradeShort(slug: string, doc: string, qid: string, answer: string, vari
   }).id;
   return ref.id;
 }
+// Regrade every `partial` short answer (lesson answers and review answers) under the current /grade
+// skill. A lesson answer keeps its old grade in `history`; its card's first rating, which came from
+// that grade, is amended too. A review answer is amended in the card's log and the card replayed.
+async function regradePartials(course?: string) {
+  const queued: string[] = [];
+  const lessons = db.query(`SELECT course, question, doc, answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE result='partial'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
+  for (const a of lessons) {
+    if (a.doc.startsWith("quizzes/")) continue;
+    gradeShort(a.course, a.doc, a.question, a.answer, null, (g) => {
+      const cur = db.query("SELECT answer, history FROM answers WHERE course=? AND question=?").get(a.course, a.question) as any;
+      if (cur?.answer !== a.answer) return;   // answered again since: that grade stands
+      const history = [...JSON.parse(cur.history ?? "[]"), { answer: a.answer, result: a.result, note: a.note, confidence: a.confidence, gradedAt: a.gradedAt, regraded: true }].slice(-10);
+      db.run("UPDATE answers SET result=?, note=?, history=?, graded_at=? WHERE course=? AND question=?", [g.result, g.note, JSON.stringify(history), now(), a.course, a.question]);
+      state.answer(a.course, a.question);
+      amendLog(a.course, a.question, (l, i) => i === 0 && l.answer === undefined && l.result === "partial", g);
+      broadcast({ type: "answer", course: a.course, doc: a.doc, question: a.question }); broadcast({ type: "card", course: a.course });
+    });
+    queued.push(`${a.course}:${a.question} (lesson)`);
+  }
+  const cards = db.query(`SELECT course, question, doc, log FROM cards WHERE course<>'vocab'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
+  for (const c of cards) for (const l of JSON.parse(c.log)) {
+    if (l.result !== "partial" || l.answer === undefined || typeof l.answer !== "string" || !l.review) continue;
+    const spec = await question(c.course, c.doc, c.question);
+    if (spec?.type !== "short") continue;
+    const v = l.variant != null ? variantsOf(c.course, c.question)[l.variant] ?? null : null;
+    gradeShort(c.course, c.doc, c.question, l.answer, v, (g) => {
+      amendLog(c.course, c.question, (x) => x.review === l.review, g);
+      broadcast({ type: "card", course: c.course, question: c.question });
+    });
+    queued.push(`${c.course}:${c.question} (review ${l.review})`);
+  }
+  return queued;
+}
+
 // Review grades in flight, one per card: a stale job (the learner re-checked) must not rate the card twice.
 const pendingReviewGrades = new Map<string, string>();
 
@@ -576,6 +610,7 @@ Bun.serve({
       GET: async (req) => { const s = await sessionDetail(req.params.id); return s ? json(s) : json({ error: "not found" }, 404); },
       PUT: async (req) => json(updateSession(req.params.id, await req.json())),
     },
+    "/api/regrade/partials": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ queued: await regradePartials(course) }); } },
     "/api/review/history": (req) => json(reviewHistory(new URL(req.url).searchParams.get("course") ?? undefined)),
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
     "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },

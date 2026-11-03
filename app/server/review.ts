@@ -572,6 +572,26 @@ export async function optimize(): Promise<{ ok: boolean; message: string; review
     return { ok: true, message: `Fitted ${w.length} weights on ${total} reviews and rescheduled every card.`, reviews: total };
   } catch (e) { return { ok: false, message: `Optimizer: ${(e as Error).message}`, reviews: total }; }
 }
+// Change one log entry's grade (a regrade) and replay the card's schedule, streak and state from its
+// log. The old grade is kept on the entry as `regraded`. Vocab cards rate by difficulty: not here.
+export function amendLog(course: string, question: string, match: (l: any, i: number) => boolean, g: { result: Result; note: string }) {
+  if (course === VOCAB) return false;
+  const row = db.query("SELECT log, suspended, state FROM cards WHERE course=? AND question=?").get(course, question) as any;
+  if (!row) return false;
+  const log = JSON.parse(row.log), i = log.findIndex(match);
+  if (i < 0) return false;
+  const l = log[i];
+  log[i] = { ...l, result: g.result, note: g.note, rating: rating(g.result, l.confidence), regraded: { result: l.result, note: l.note ?? null, at: now() } };
+  const f = scheduler(), rated = log.filter((x: any) => x.review);
+  let card = createEmptyCard(new Date(rated[0].review));
+  for (const x of rated) card = f.next(card, new Date(x.review), x.rating).card;
+  let streak = 0; for (const x of rated) streak = x.rating === Rating.Again ? 0 : streak + 1;
+  const st = row.state === "orphaned" ? "orphaned" : stateOf(card, streak, log.length, !!row.suspended);
+  db.run("UPDATE cards SET due=?, card=?, streak=?, log=?, state=?, updated_at=? WHERE course=? AND question=?", [card.due.toISOString(), JSON.stringify(card), streak, JSON.stringify(log), st, now(), course, question]);
+  state.card(course, question);
+  return true;
+}
+
 // Recompute every card's schedule from its log under the current retention and weights.
 export function reschedule() {
   const f = scheduler();
