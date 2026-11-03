@@ -272,11 +272,11 @@ function gradeShort(slug: string, doc: string, qid: string, answer: string, vari
 // Regrade every `partial` short answer (lesson answers and review answers) under the current /grade
 // skill. A lesson answer keeps its old grade in `history`; its card's first rating, which came from
 // that grade, is amended too. A review answer is amended in the card's log and the card replayed.
-async function regradePartials(course?: string) {
+async function regradePartials(course?: string, only?: string) {
   const queued: string[] = [];
   const lessons = db.query(`SELECT course, question, doc, answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE result='partial'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
   for (const a of lessons) {
-    if (a.doc.startsWith("quizzes/")) continue;
+    if (a.doc.startsWith("quizzes/") || (only && a.question !== only)) continue;
     gradeShort(a.course, a.doc, a.question, a.answer, null, (g) => {
       const cur = db.query("SELECT answer, history FROM answers WHERE course=? AND question=?").get(a.course, a.question) as any;
       if (cur?.answer !== a.answer) return;   // answered again since: that grade stands
@@ -289,7 +289,7 @@ async function regradePartials(course?: string) {
     queued.push(`${a.course}:${a.question} (lesson)`);
   }
   const cards = db.query(`SELECT course, question, doc, log FROM cards WHERE course<>'vocab'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
-  for (const c of cards) for (const l of JSON.parse(c.log)) {
+  for (const c of cards) for (const l of JSON.parse(only && c.question !== only ? "[]" : c.log)) {
     if (l.result !== "partial" || l.answer === undefined || typeof l.answer !== "string" || !l.review) continue;
     const spec = await question(c.course, c.doc, c.question);
     if (spec?.type !== "short") continue;
@@ -610,7 +610,7 @@ Bun.serve({
       GET: async (req) => { const s = await sessionDetail(req.params.id); return s ? json(s) : json({ error: "not found" }, 404); },
       PUT: async (req) => json(updateSession(req.params.id, await req.json())),
     },
-    "/api/regrade/partials": { POST: async (req) => { const { course } = (await req.json().catch(() => ({}))) as { course?: string }; return json({ queued: await regradePartials(course) }); } },
+    "/api/regrade/partials": { POST: async (req) => { const { course, question } = (await req.json().catch(() => ({}))) as { course?: string; question?: string }; return json({ queued: await regradePartials(course, question) }); } },
     "/api/review/history": (req) => json(reviewHistory(new URL(req.url).searchParams.get("course") ?? undefined)),
     "/api/review/cards/:course/:question/suspend": { POST: async (req) => { const { suspended } = (await req.json()) as { suspended: boolean }; setSuspended(req.params.course, req.params.question, suspended); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },
     "/api/review/cards/:course/:question/flag": { POST: async (req) => { const { note } = (await req.json()) as { note: string | null }; setFlag(req.params.course, req.params.question, note || null); broadcast({ type: "card", course: req.params.course }); return json({ ok: true }); } },

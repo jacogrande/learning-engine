@@ -11,6 +11,7 @@ Arguments: $ARGUMENTS — course slug, the section file (course-relative, e.g. `
 1. Read the section; find the `quiz` block with that id. Read `learner.md` `errors`.
    If the request says the learner was asked a **variant** and gives its prompt and rubric, grade against that variant's rubric, not the block in the file; the block only tells you which idea is being tested.
 2. Read the whole answer before scoring any part of it. Score against the rubric's numbered idea units, on substance:
+   - Score only the units the prompt asks for. The learner sees the prompt, never the rubric: a unit a careful reader of the prompt alone would not know to address (a contrast with the other options, a "why not the rest", a mechanism or example the prompt does not request) is not required. Leave it out of the result; it may go in the note as one sentence that extends the idea, never as "missing".
    - A unit is present if any part of the answer states the idea, in any words. The rubric's wording is one way to say it, not the required one. Its examples ("for example", "such as", a sample sentence or scenario) illustrate the unit; the learner need not give that example or any example unless the unit itself asks for one.
    - Never score one clause in isolation when another clause of the answer states the idea or rules out the misreading.
    - An answer that can be read as the right idea or as a misconception is read as the right idea.

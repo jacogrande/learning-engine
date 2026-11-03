@@ -103,7 +103,7 @@ Fields:
 - `id`: unique in the course; never changed or reused. Patterns, two digits zero-padded: baseline `q-base-01`; section `q-02-03` (module number, question number counted across the module); warm-up review `q-02-r1`; module test `q-02-t03`; drill-down `q-02-dd01`; flashcard made in a chat `q-02-fc01`; worksheet exercise `q-02-ws01` (numbered across all the module's worksheets).
 - `objective`: the outline objective the question tests, `obj-02-1` (module number, objective position). Required everywhere except the baseline.
 - `prompt`: self-contained; the reader may meet it weeks later as spaced review.
-- `rubric` (`short`): two to four numbered idea units, then a `Wrong if:` line naming the misconception. The learner may see it as the model answer; write it as one. No grader talk.
+- `rubric` (`short`): two to four numbered idea units, then a `Wrong if:` line naming the misconception. The learner may see it as the model answer; write it as one. No grader talk. Every unit answers something the prompt asks: the learner sees only the prompt, and the grader scores only what it asks for. To require a contrast ("why the others are not"), a mechanism, or an example, the prompt says so: "Which sentence is plot, why, and why are the others not?"
 - `options` (`mcq`): one line each, no `: ` inside. Every distractor is a misconception from the research files or a neighbouring idea from the module. `answer` is the 0-based index. `explanation`: why the answer is right and why the most tempting distractor tempts.
 
 YAML: write `prompt`, `rubric`, and `explanation` as `>-` block scalars, always. Never a double-quoted scalar with `\"` escapes inside a quiz block. After writing an `mcq`, confirm `options[answer]` is the correct option.
