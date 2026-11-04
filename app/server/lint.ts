@@ -27,6 +27,9 @@ export async function lint(course: string, mod: string): Promise<string[]> {
     if (sheet && !doc.frontmatter.section) problems.push(`${f}: no section in frontmatter`);
     const fences = [...doc.body.matchAll(/```quiz\n([\s\S]*?)```/g)];
     if (!fences.length && f !== "understanding.md") problems.push(`${f}: no quiz block`);
+    // The first module's test re-asks a baseline question; when no objective of the module fits it,
+    // it carries none (generate-module-test). One such question is allowed there, nowhere else.
+    let unaimed = f === "quiz.md" && mod.startsWith("01-") ? 1 : 0;
     for (const [, body] of fences) {
       let q: any;
       try { q = YAML.parse(body); } catch (e) { problems.push(`${f}: quiz block does not parse (${String(e).split("\n")[0]})`); continue; }
@@ -34,7 +37,8 @@ export async function lint(course: string, mod: string): Promise<string[]> {
       if (!ID.test(id)) problems.push(`${f}: bad quiz id "${id}"`);
       if (seen.has(id)) problems.push(`${f}: duplicate quiz id "${id}"`); seen.add(id);
       if (!q?.prompt) problems.push(`${f}: ${id} has no prompt`);
-      if (!OBJ.test(String(q?.objective ?? ""))) problems.push(`${f}: ${id} has no objective`);
+      if (q?.objective == null && unaimed > 0) unaimed--;
+      else if (!OBJ.test(String(q?.objective ?? ""))) problems.push(`${f}: ${id} has no objective`);
       if (q?.type === "mcq") {
         if (!Array.isArray(q.options) || q.options.length < 3) problems.push(`${f}: ${id} needs 3+ options`);
         else if (!Number.isInteger(q.answer) || q.answer < 0 || q.answer >= q.options.length) problems.push(`${f}: ${id} answer out of range`);
