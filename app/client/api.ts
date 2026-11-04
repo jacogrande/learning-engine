@@ -17,7 +17,7 @@ export type QuizState = { draft: Sheet | null; attempt: Attempt | null };
 export type PastAnswer = { answer: string; result: Result | null; note: string | null; confidence: number | null; gradedAt: string | null };
 export type Answer = { question: string; answer: string; result: Result | null; note: string | null; job: string | null; confidence?: number | null; gradedAt: string | null; history?: PastAnswer[]; failed?: boolean };   // failed: the grader did not answer; check again
 export type Annotation = { id: string; doc: string; quote: string; prefix: string; suffix: string; createdAt: string };
-export type Chat = { id: string; doc: string; kind?: "section" | "summary"; module?: string | null; context: string | null; title: string; createdAt: string; updatedAt?: string; messages?: number };
+export type Chat = { id: string; doc: string; kind?: "section" | "summary" | "vocab"; module?: string | null; context: string | null; title: string; createdAt: string; updatedAt?: string; messages?: number };
 // What an assistant turn did in the app, when the learner asked (see server/actions.ts).
 export type ChatAction = { type: "cards" | "vocab" | "lesson"; ok: boolean; text: string; to?: string | null; job?: string; undo?: unknown; undone?: boolean };
 export type Message = { id: string; role: "user" | "assistant"; content: string; actions?: ChatAction[] };

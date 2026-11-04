@@ -9,19 +9,48 @@ import { Link } from "./App";
 const visible = (s: string) => s.replace(/```action[\s\S]*$/, "").trimEnd();
 
 export function ChatPane({ slug, doc, draft, onDraftUsed, open }: { slug: string; doc: string; draft: string | null; onDraftUsed: () => void; open?: string | null }) {
-  const { data: chats, reload } = useLive<ChatRow[]>(`/api/courses/${slug}/chats?doc=${encodeURIComponent(doc)}`);
+  return (
+    <ChatList
+      list={`/api/courses/${slug}/chats?doc=${encodeURIComponent(doc)}`}
+      create={(message, context) => post<{ chat: ChatRow }>(`/api/courses/${slug}/chats`, { doc, context: context ?? undefined, message })}
+      placeholder={draft ? (draft.startsWith("Question: ") ? "Ask about this feedback" : "Ask about the selected passage") : "Ask about this section"}
+      draft={draft} onDraftUsed={onDraftUsed} open={open}
+    />
+  );
+}
+
+// Chats about one vocabulary word, from its Train card. `draft` is what the card shows, so the tutor
+// knows the task, the learner's answer and the grade.
+export function VocabChatPane({ wid, draft, onDraftUsed }: { wid: string; draft: string | null; onDraftUsed: () => void }) {
+  return (
+    <ChatList
+      list={`/api/vocab/${wid}/chats`}
+      create={(message, context) => post<{ chat: ChatRow }>(`/api/vocab/${wid}/chats`, { context: context ?? undefined, message })}
+      placeholder="Ask about this word"
+      draft={draft} onDraftUsed={onDraftUsed} compact
+    />
+  );
+}
+
+// The chats for one thing: a composer that starts a new one, the list of earlier ones, and the open
+// thread. `compact` keeps the earlier chats to a short line each, for a card that has little room.
+function ChatList({ list, create, placeholder, draft, onDraftUsed, open, compact }: {
+  list: string; create: (message: string, context: string | null) => Promise<{ chat: ChatRow }>; placeholder: string;
+  draft: string | null; onDraftUsed: () => void; open?: string | null; compact?: boolean;
+}) {
+  const { data: chats, reload } = useLive<ChatRow[]>(list);
   const [active, setActive] = useState<string | null>(open ?? null);
   useEffect(() => { if (open) setActive(open); }, [open]);
   useEffect(() => { if (draft) setActive(null); }, [draft]);
 
-  if (active) return <Thread id={active} onBack={() => { setActive(null); reload(); }} />;
+  if (active) return <Thread id={active} onBack={() => { setActive(null); reload(); }} hideContext={compact} />;
   return (
     <div className="chat">
       <Composer
-        context={draft}
-        placeholder={draft ? (draft.startsWith("Question: ") ? "Ask about this feedback" : "Ask about the selected passage") : "Ask about this section"}
+        context={compact ? null : draft}
+        placeholder={placeholder}
         onSend={async (message) => {
-          const { chat } = await post<{ chat: ChatRow }>(`/api/courses/${slug}/chats`, { doc, context: draft ?? undefined, message });
+          const { chat } = await create(message, draft);
           onDraftUsed(); setActive(chat.id);
         }}
       />

@@ -684,9 +684,25 @@ dialog.modal::backdrop { background: var(--scrim); }
 .vocab-head:hover { background: var(--hover); }
 .vocab-word { font-weight: 600; }
 .vocab-def { color: var(--muted); font-size: var(--fs-small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.vocab-row.is-open .vocab-def { visibility: hidden; }
+.vocab-head { text-decoration: none; color: inherit; cursor: pointer; }
+.vocab-row.is-open .vocab-head { background: var(--hover); box-shadow: inset 3px 0 var(--accent); padding-left: var(--s-3); }
 .vocab-status { font-size: var(--fs-small); text-align: right; }
-.vocab-body { padding: 0 0 var(--s-4); }
+/* Split view: the list narrows into a nav, the chosen word fills the right. */
+.vocab-page.is-split { max-width: 72rem; }
+.is-split .vocab-cols { display: grid; grid-template-columns: 18rem minmax(0, 44rem); gap: var(--s-7); align-items: start; }
+.is-split .vocab-side { position: sticky; top: calc(var(--top-h) + var(--s-4)); max-height: calc(100vh - var(--top-h) - var(--s-6)); overflow: auto; }
+.is-split .vocab-tools { margin-top: 0; }
+.is-split .vocab-tools .field { min-width: 0; flex-basis: 100%; }
+.is-split .vocab-head { grid-template-columns: 1fr auto; padding: var(--s-2) var(--s-2); }
+.is-split .vocab-head .vocab-def, .is-split .vocab-head .vocab-status, .is-split .vocab-head > .muted:nth-child(2) { display: none; }
+.vocab-detail { min-width: 0; }
+.vocab-back { margin-bottom: var(--s-3); }
+.vocab-detail .vocab-title { margin: 0 0 var(--s-2); font-size: var(--fs-display); line-height: var(--lh-display); letter-spacing: -.02em; }
+.vocab-standing { display: flex; align-items: center; gap: var(--s-3); }
+@media (max-width: 760px) {
+  .is-split .vocab-cols { display: block; }
+  .is-split .vocab-side { display: none; }
+}
 .ladder { display: inline-flex; gap: 3px; align-items: center; }
 .ladder i { width: 10px; height: 4px; border-radius: 2px; background: var(--faint); }
 .ladder i.on { background: var(--accent); }
@@ -704,6 +720,21 @@ dialog.modal::backdrop { background: var(--scrim); }
 .nb-words li { display: grid; grid-template-columns: minmax(7rem, auto) auto 1fr; gap: var(--s-3); align-items: baseline; padding: var(--s-1) 0; font-size: var(--fs-ui); }
 
 .train { max-width: 44rem; }
+/* With a chat open the page widens into two columns: the card, and the chat beside it. */
+.train.has-chat { max-width: 76rem; display: grid; grid-template-columns: minmax(0, 44rem) minmax(18rem, 28rem); gap: var(--s-7); align-items: start; }
+.train-main { min-width: 0; }
+.train-chat { display: flex; flex-direction: column; gap: var(--s-3); position: sticky; top: calc(var(--top-h) + var(--s-5)); max-height: calc(100vh - var(--top-h) - var(--s-7)); padding: var(--s-4); border: var(--hairline) solid var(--faint); border-radius: var(--radius-2); background: var(--bg); }
+.train-chat-head { display: flex; justify-content: space-between; align-items: baseline; }
+.train-chat-head .kicker { margin: 0; }
+.train-chat .chat { min-height: 0; }
+.train-chat .chat-thread { max-height: 50vh; }
+.neighbours { margin: var(--s-2) 0 0; padding-left: var(--s-5); }
+.neighbours li { margin: 0 0 var(--s-1); }
+.keys .link { font: inherit; color: inherit; text-decoration: underline; }
+@media (max-width: 1100px) {
+  .train.has-chat { display: block; max-width: 44rem; }
+  .train-chat { position: static; max-height: none; margin-top: var(--s-5); }
+}
 .train-progress { height: 3px; background: var(--faint); border-radius: 2px; overflow: hidden; margin-bottom: var(--s-2); }
 .train-progress span { display: block; height: 100%; background: var(--accent); transition: width var(--slow); }
 .train-card { padding: var(--s-5) 0; }

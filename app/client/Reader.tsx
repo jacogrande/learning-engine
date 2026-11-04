@@ -107,11 +107,13 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setDrawer(null); };
     document.addEventListener("keydown", onKey); return () => document.removeEventListener("keydown", onKey);
   }, [drawer]);
-  // Cmd+1 / Cmd+2 (Ctrl on Linux and Windows): Notes or Chat, opened if closed, with the cursor in it.
+  // Cmd+1 / Cmd+2 (Ctrl on Linux and Windows): Notes or Chat, with the cursor in it. Only while the
+  // panel has focus; anywhere else on the page the keys keep their browser meaning (switch tab).
   // Captured before anything else, so the browser's own use of the keys is cancelled where it lets us.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey || (e.code !== "Digit1" && e.code !== "Digit2")) return;
+      if (!(e.target instanceof Element) || !e.target.closest(".pane")) return;
       e.preventDefault(); e.stopPropagation();
       const which = e.code === "Digit1" ? "notes" : "chat";
       openPane(which);
@@ -235,7 +237,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
   const tally = testSpecs.reduce((t, id) => { const r = saved[id]?.result; if (r) t[r] = (t[r] ?? 0) + 1; return t; }, {} as Record<string, number>);
 
   return (
-    <Shell crumbs={[...crumbs, { label: mod.title }]} className={`reader ${drawer ? `drawer-${drawer}` : ""} ${folded.nav ? "nav-folded" : ""} ${folded.pane ? "pane-folded" : ""}`}>
+    <Shell crumbs={[...crumbs, { label: mod.title }]} title={title || undefined} className={`reader ${drawer ? `drawer-${drawer}` : ""} ${folded.nav ? "nav-folded" : ""} ${folded.pane ? "pane-folded" : ""}`}>
       <nav className="side" onClick={(e) => { if ((e.target as HTMLElement).closest("a")) setDrawer(null); }}>
         <button className="fold fold-nav" onClick={() => fold("nav", true)} aria-label="Collapse contents" title="Collapse contents">
           <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M10 3 5 8l5 5" /></svg>

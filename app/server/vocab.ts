@@ -11,7 +11,7 @@ import { listCourses } from "./content";
 import { rate, readProfile, patchProfile, GRADE_SCHEMA, isResult, type Result } from "./review";
 import {
   VOCAB, wordRow, parseRow, testPool, anchorOf, lastAsked, freshest, blank, day,
-  type Context, type Entry, type Example, type Format, type Kin, type Probe, type TrainLog, type VocabRow,
+  type Context, type Entry, type Example, type Format, type Kin, type Neighbour, type Probe, type TrainLog, type VocabRow,
 } from "./vocab-spec";
 
 export { VOCAB };
@@ -19,7 +19,7 @@ export { VOCAB };
 // Train ladder: each stage is the format asked next. 5 = through the ladder; kept up by review.
 export const LADDER: Format[] = ["meet", "pick", "recall", "explain", "use"];
 export const DONE = LADDER.length;
-const FORMATS: Format[] = [...LADDER, "kin-pick", "kin-explain"];
+const FORMATS: Format[] = [...LADDER, "kin-pick", "kin-explain", "near-pick", "near-explain"];
 const UPKEEP: Format[] = ["recall", "explain", "use"];
 const LOG_MAX = 80;
 
@@ -30,9 +30,12 @@ const EXAMPLE = { type: "object", properties: { sentence: { type: "string" }, fo
 const FAMILY = { type: "array", items: { type: "object", properties: {
   word: { type: "string" }, pos: { type: "string" }, relation: { type: "string" }, sense: { type: "string" }, example: EXAMPLE, separate: { type: "boolean" },
 }, required: ["word", "pos", "relation", "sense", "example", "separate"] } };
+const NEIGHBOURS = { type: "array", items: { type: "object", properties: { word: { type: "string" }, difference: { type: "string" }, example: EXAMPLE }, required: ["word", "difference", "example"] } };
+const DISTRACTORS = { type: "array", items: { type: "string" } };
 const ENTRY_SCHEMA = {
   type: "object",
   properties: {
+    distractors: DISTRACTORS, neighbours: NEIGHBOURS,
     headword: { type: "string" }, pos: { type: "string" }, explanation: { type: "string" },
     forms: { type: "array", items: { type: "string" } },
     examples: { type: "array", items: EXAMPLE }, tests: { type: "array", items: EXAMPLE },
@@ -41,7 +44,7 @@ const ENTRY_SCHEMA = {
     probes: { type: "array", items: { type: "object", properties: { question: { type: "string" }, answer: { type: "string" } }, required: ["question", "answer"] } },
     family: FAMILY,
   },
-  required: ["headword", "pos", "explanation", "forms", "examples", "tests", "probes", "family"],
+  required: ["headword", "pos", "explanation", "forms", "examples", "tests", "probes", "family", "distractors", "neighbours"],
 };
 
 // --- the list ---------------------------------------------------------------------
@@ -170,7 +173,26 @@ function cleanEntry(e: any, word: string): Entry | null {
     parts: str(e.parts) || null, register: str(e.register) || null,
     probes: (Array.isArray(e.probes) ? e.probes : []).map((p: any) => ({ question: str(p?.question), answer: str(p?.answer) })).filter((p: Probe) => p.question && p.answer).slice(0, 6),
     ...(Array.isArray(e.family) ? { family: cleanFamily(e.family, headword, e.forms) } : {}),
+    ...(Array.isArray(e.distractors) ? { distractors: cleanDistractors(e.distractors, headword, e.forms, e.confusable?.word) } : {}),
+    ...(Array.isArray(e.neighbours) ? { neighbours: cleanNeighbours(e.neighbours, headword, e.forms) } : {}),
   };
+}
+
+// Pick distractors: single words, none a form of the headword or its confusable, each listed once.
+function cleanDistractors(list: unknown[], headword: string, forms: unknown, confusable?: unknown): string[] {
+  const own = new Set([headword, ...(Array.isArray(forms) ? forms : []), confusable ?? ""].map((x) => norm(String(x))));
+  const seen = new Set<string>();
+  return list.map((x) => str(x)).filter((w) => w && w.length <= 40 && !own.has(norm(w)) && !seen.has(norm(w)) && seen.add(norm(w))).slice(0, 6);
+}
+
+// Near-synonyms: each with what separates it from the headword, and an example that fits it alone.
+function cleanNeighbours(list: any[], headword: string, forms: unknown): Neighbour[] {
+  const own = new Set([headword, ...(Array.isArray(forms) ? forms : [])].map((x) => norm(String(x))));
+  const seen = new Set<string>();
+  return list.map((n: any) => {
+    const word = str(n?.word), ex = { sentence: str(n?.example?.sentence), form: str(n?.example?.form) };
+    return { word, difference: str(n?.difference), example: ex.sentence && ex.form && ex.sentence.includes(ex.form) ? ex : null };
+  }).filter((n) => n.word && n.difference && n.word.length <= 40 && !own.has(norm(n.word)) && !seen.has(norm(n.word)) && seen.add(norm(n.word))).slice(0, 4);
 }
 
 // Family members: a real word, not the headword or one of its inflections, each listed once.
@@ -229,9 +251,31 @@ export function deleteWord(wid: string) {
 export function resumePending() {
   for (const r of db.query("SELECT id FROM vocab WHERE status='pending'").all() as any[])
     enrich(r.id).catch((e) => { console.warn("vocab entry:", e.message); failed(r.id); });
-  // Entries written before word families existed get theirs, one background job each.
-  for (const r of db.query("SELECT id, entry FROM vocab WHERE status='ready' AND entry IS NOT NULL").all() as any[])
-    if (!("family" in JSON.parse(r.entry))) fillFamily(r.id);
+  // Entries written before word families, Pick distractors or near-synonyms existed get theirs, one
+  // background job each.
+  for (const r of db.query("SELECT id, entry FROM vocab WHERE status='ready' AND entry IS NOT NULL").all() as any[]) {
+    const e = JSON.parse(r.entry);
+    if (!("family" in e)) fillFamily(r.id);
+    if (!("distractors" in e) || !("neighbours" in e)) fillNear(r.id);
+  }
+}
+
+// Writes only the Pick distractors and the near-synonyms into an existing entry.
+function fillNear(wid: string) {
+  const w = wordRow(wid);
+  if (!w?.entry || liveFor(VOCAB, wid).some((j) => j.kind === "vocab")) return;
+  const e = w.entry;
+  enqueue(VOCAB, "vocab", `/vocab-entry\n\nDistractors and near-synonyms only, for: ${e.headword} (${e.pos}): ${e.explanation}${e.confusable ? `\nIts confusable, which is neither: ${e.confusable.word}` : ""}`, {
+    ref: wid, schema: { type: "object", properties: { distractors: DISTRACTORS, neighbours: NEIGHBOURS }, required: ["distractors", "neighbours"] },
+    then: (r: any) => {
+      const cur = wordRow(wid); if (!cur?.entry) return;
+      const c = cur.entry;
+      save(wid, { entry: JSON.stringify({ ...c,
+        distractors: cleanDistractors(Array.isArray(r?.distractors) ? r.distractors : [], c.headword, c.forms, c.confusable?.word),
+        neighbours: cleanNeighbours(Array.isArray(r?.neighbours) ? r.neighbours : [], c.headword, c.forms),
+      }) });
+    },
+  });
 }
 
 // Writes only the family into an existing entry, leaving the learner's edits to the rest alone.
@@ -287,7 +331,7 @@ export function vocabRating(result: Result, difficulty: number, format: Format):
   return difficulty >= 3 ? Rating.Easy : difficulty === 2 ? Rating.Good : Rating.Hard;
 }
 
-export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe; kin?: { word: string; sense: string }; session?: string };
+export type Attempt = { format: Format; sentence: string; form: string; answer: string; difficulty?: number; mode: "review" | "train"; result?: Result; probe?: Probe; kin?: { word: string; sense: string }; near?: { word: string; difference: string }[]; session?: string };
 type Graded = { result: Result; note: string };
 
 export function parseAttempt(b: any): Attempt | null {
@@ -298,6 +342,7 @@ export function parseAttempt(b: any): Attempt | null {
     result: isResult(b.result) ? b.result : undefined, session: typeof b.session === "string" ? b.session.slice(0, 40) : undefined,
     probe: b.probe && typeof b.probe.question === "string" && typeof b.probe.answer === "string" ? { question: b.probe.question, answer: b.probe.answer } : undefined,
     kin: b.kin && typeof b.kin.word === "string" && typeof b.kin.sense === "string" ? { word: b.kin.word.slice(0, 40), sense: b.kin.sense.slice(0, 500) } : undefined,
+    near: Array.isArray(b.near) ? b.near.filter((n: any) => n && typeof n.word === "string" && typeof n.difference === "string").map((n: any) => ({ word: n.word.slice(0, 40), difference: n.difference.slice(0, 500) })).slice(0, 4) : undefined,
   };
 }
 
@@ -325,15 +370,15 @@ export function answer(wid: string, a: Attempt, done: (g: Graded | { error: stri
   if (!w?.entry) throw new Error("word not ready");
   const entry = w.entry;
   const at_once = (g: Graded) => { if (a.mode === "review") pendingReview.delete(wid); const review = record(wid, a, g); done(g, null); return { job: null, ...g, review }; };
-  if ((a.format === "pick" || a.format === "kin-pick") && a.result) return at_once({ result: a.result, note: "" });
+  if ((a.format === "pick" || a.format === "kin-pick" || a.format === "near-pick") && a.result) return at_once({ result: a.result, note: "" });
   if (!a.answer.trim()) return at_once({ result: "skipped", note: "" });
   if (a.format === "recall" && exact(a.answer, a.form, entry)) return at_once({ result: "correct", note: "" });
   const flag = (db.query("SELECT flag FROM cards WHERE course=? AND question=?").get(VOCAB, wid) as any)?.flag;
   const current = () => a.mode !== "review" || pendingReview.get(wid) === job.id;
   const job = enqueue(VOCAB, "grade", `/grade-vocab\n\n${JSON.stringify({
     headword: entry.headword, pos: entry.pos, explanation: entry.explanation, confusable: entry.confusable,
-    format: a.probe ? "probe" : a.format === "kin-explain" ? "family" : a.format, sentence: a.probe || a.kin ? undefined : a.sentence, expected: a.format === "recall" ? a.form : undefined,
-    question: a.probe?.question, word: a.kin?.word, model_answer: a.probe?.answer ?? a.kin?.sense, answer: a.answer,
+    format: a.probe ? "probe" : a.format === "kin-explain" ? "family" : a.format === "near-explain" ? "nuance" : a.format, sentence: a.probe || a.kin || a.near ? undefined : a.sentence, expected: a.format === "recall" ? a.form : undefined,
+    question: a.probe?.question, word: a.kin?.word, neighbours: a.near, model_answer: a.probe?.answer ?? a.kin?.sense ?? a.near?.map((n) => `${n.word}: ${n.difference}`).join(" "), answer: a.answer,
   }, null, 2)}${flag ? `\n\nThe learner flagged an earlier grade on this word as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
     ref: wid, schema: GRADE_SCHEMA,
     then: (g: any) => {
@@ -367,7 +412,7 @@ function record(wid: string, a: Attempt, g: Graded) {
     syncProfiles(); refreshTests(wid);
     return r;
   }
-  const line: TrainLog = { at: now(), format: a.format, result: g.result, answer: a.answer, note: g.note || undefined, sentence: a.probe || a.format === "kin-explain" ? undefined : a.sentence || undefined, probe: a.probe?.question, kin: a.kin?.word };
+  const line: TrainLog = { at: now(), format: a.format, result: g.result, answer: a.answer, note: g.note || undefined, sentence: a.probe || a.format === "kin-explain" || a.format === "near-explain" ? undefined : a.sentence || undefined, probe: a.probe?.question, kin: a.kin?.word, near: a.format === "near-pick" ? a.form : a.near?.map((n) => n.word).join("/") };
   save(wid, { train_log: JSON.stringify([...w.trainLog, line].slice(-LOG_MAX)), trained_at: now() });
   refreshTests(wid);
   return null;
@@ -403,6 +448,7 @@ export type Task = {
   word: string; format: Format; stage: number; headword: string; entry: Entry; contexts: Context[]; courseTerm: string | null;
   sentence: string; form: string; anchor: Example; prompt: string; hint?: string; options?: string[]; answer?: number; probe?: Probe;
   bonus?: boolean; kin?: Kin;   // a family question: extra practice, never counted toward the ladder
+  near?: Neighbour[]; nearWord?: string;   // a near-synonym question: the neighbours shown after, and for a pick the word that fits
 };
 
 const shuffle = <T,>(xs: T[]) => { const a = [...xs]; for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; };
@@ -429,10 +475,17 @@ export function task(wid: string, stage?: number): Task | null {
     // each is known, not while one is new.
     const px = freshest(pool, last, (x) => norm(x.form) === norm(e.headword));
     const others = (db.query("SELECT entry FROM vocab WHERE status='ready' AND id<>?").all(wid) as any[]).map((r) => JSON.parse(r.entry) as Entry);
-    const avoid = new Set([norm(e.headword), norm(e.confusable?.word ?? "")]);
+    // Never the confusable, and never a near-synonym: either might fit the sentence.
+    const avoid = new Set([norm(e.headword), norm(e.confusable?.word ?? ""), ...(e.neighbours ?? []).map((n) => norm(n.word))]);
     const same = shuffle(others.filter((o) => o.pos === e.pos)).map((o) => o.headword);
     const rest = shuffle(others.filter((o) => o.pos !== e.pos)).map((o) => o.headword);
-    const distractors = [...new Set([...same, ...rest])].filter((x) => !avoid.has(norm(x))).slice(0, 3);
+    const fromList = [...new Set([...same, ...rest])].filter((x) => !avoid.has(norm(x)));
+    // The entry's own distractors are words outside the learner's list. One or two of the three come
+    // from there when the list has enough words of its own, more when it does not: a short list would
+    // otherwise show the same few names every time, and a choice among them tests the list, not the word.
+    const outside = shuffle((e.distractors ?? []).filter((x) => !avoid.has(norm(x)) && !fromList.some((y) => norm(y) === norm(x))));
+    const k = Math.min(outside.length, Math.max(3 - fromList.length, 1 + (Math.random() < 0.5 ? 1 : 0)));
+    const distractors = [...outside.slice(0, k), ...fromList.slice(0, 3 - k)];
     if (distractors.length < 2) return task(wid, 2);   // too few words yet for a fair choice: recall instead
     const options = shuffle([e.headword, ...distractors]);
     return { ...base, sentence: px.sentence, form: px.form, prompt: `Which word fits?\n\n> ${blank(px)}`, options, answer: options.indexOf(e.headword) };
@@ -513,6 +566,42 @@ function kinTask(wid: string): Task | null {
     prompt: `You know **${e.headword}**: ${e.explanation}\n\n**${k.word}** (${k.pos}) is in its family. What does it mean?` };
 }
 
+// Near-synonym questions: once a word is known (the Explain rung on), it is told apart from the words it
+// is closest to in meaning. Outside the ladder, like family questions, and at most one every few days
+// per word. Two forms, taken in turn:
+// - near-pick: a sentence that fits exactly one of the set (a neighbour's own example, or one of the
+//   word's test sentences), with the word and its neighbours as the choices, all in base form.
+// - near-explain: when to say the word rather than its neighbours, graded against the differences.
+const NEAR_PER_SESSION = 3, NEAR_GAP_DAYS = 4, NEAR_STAGE = 3;
+function nearTask(wid: string): Task | null {
+  const w = wordRow(wid);
+  const e = w?.entry, near = e?.neighbours ?? [];
+  if (!w || !e || w.stage < NEAR_STAGE || !near.length) return null;
+  const asked = w.trainLog.filter((l) => l.format === "near-pick" || l.format === "near-explain");
+  const last = asked.at(-1);
+  if (last && Date.now() - +new Date(last.at) < NEAR_GAP_DAYS * 864e5) return null;
+  const base = { word: wid, stage: w.stage, headword: e.headword, entry: e, contexts: w.contexts, courseTerm: w.course_term, anchor: anchorOf(w), bonus: true, near };
+  const others = near.map((n) => `**${n.word}**`);
+  const list = others.length > 1 ? `${others.slice(0, -1).join(", ")} or ${others.at(-1)}` : others[0];
+  const explain = (): Task => ({ ...base, format: "near-explain", sentence: "", form: "",
+    prompt: `When would you say **${e.headword}** rather than ${list}? Say what separates them.` });
+  if (last?.format === "near-pick") return explain();
+  // Candidates whose blank takes the base form, so grammar does not give the choice away.
+  const pool = testPool(w), lastAt = lastAsked(w, cardLog(wid));
+  const own = pool.filter((x) => norm(x.form) === norm(e.headword));
+  const cands: { word: string; ex: Example }[] = [
+    ...near.filter((n) => n.example && norm(n.example.form) === norm(n.word)).map((n) => ({ word: n.word, ex: n.example! })),
+    ...(own.length ? [{ word: e.headword, ex: freshest(own, lastAt) }] : []),
+  ];
+  const options = shuffle([e.headword, ...near.map((n) => n.word)]).slice(0, 5);
+  const usable = cands.filter((c) => options.includes(c.word));
+  if (!usable.length || options.length < 3) return explain();
+  const when = (word: string) => asked.filter((l) => l.format === "near-pick" && norm(l.near ?? "") === norm(word)).at(-1)?.at ?? "";
+  const c = [...usable].sort((a, b) => (when(a.word) < when(b.word) ? -1 : 1))[0];
+  return { ...base, format: "near-pick", sentence: c.ex.sentence, form: c.ex.form, nearWord: c.word, options, answer: options.indexOf(c.word),
+    prompt: `Which fits: ${options.map((o) => `**${o}**`).join(", ")}?\n\n> ${blank(c.ex)}` };
+}
+
 // A session in progress, kept on the server so a refresh, another tab or a dropped connection picks
 // it up where it was. The client owns its shape; it only has to be today's and unfinished.
 export type SavedSession = { day: string; i: number; queue: (Task | { word: string; placeholder: true })[]; tally: Record<string, unknown>; pending?: unknown };
@@ -527,9 +616,11 @@ export function session(fresh = false) {
     return { resume: { ...saved, queue }, tasks: [], counts: counts(), criterion: CRITERION };
   }
   const picked = pick().picked;
-  // The family questions go after the main pass, so other words come between them and each word's own tasks.
-  const bonus = picked.map((r) => kinTask(r.id)).filter(Boolean).slice(0, KIN_PER_SESSION) as Task[];
-  return { tasks: [...(picked.map((r) => task(r.id)).filter(Boolean) as Task[]), ...bonus], counts: counts(), criterion: CRITERION };
+  // The family and near-synonym questions go after the main pass, so other words come between them and
+  // each word's own tasks. Near-synonym questions first: they are the ones that tell known words apart.
+  const near = picked.map((r) => nearTask(r.id)).filter(Boolean).slice(0, NEAR_PER_SESSION) as Task[];
+  const kin = picked.map((r) => kinTask(r.id)).filter(Boolean).slice(0, KIN_PER_SESSION) as Task[];
+  return { tasks: [...(picked.map((r) => task(r.id)).filter(Boolean) as Task[]), ...near, ...kin], counts: counts(), criterion: CRITERION };
 }
 
 export function counts() {

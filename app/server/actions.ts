@@ -19,6 +19,10 @@ export const ACTIONS_SYSTEM = `The learner can ask you to act in the app. Only w
 - Vocabulary: {"type":"vocab","words":[{"word":"...","sentence":"..."}]}. "sentence" is the sentence the word was met in, quoted exactly from the section or this chat, or omitted.
 - A new lesson in this module: {"type":"lesson","title":"...","topic":"..."}. "title" states the lesson's claim; "topic" is two to four sentences on what it must teach, drawn from this conversation, and what the learner already has.`;
 
+// A chat about one vocabulary word can add words (the near-synonyms it brings up, say), nothing else:
+// flashcards and lessons belong to a course module, which it has none of.
+export const VOCAB_ACTIONS_SYSTEM = `The learner can ask you to add words to their vocabulary. Only when they ask in so many words ("add pillage as a word", "save that one"), end your reply with one fenced block, \`\`\`action, holding {"type":"vocab","words":[{"word":"...","sentence":"..."}]}, "sentence" being the sentence the word was met in, quoted exactly from this chat, or omitted; and say in your reply what you did. Never act unasked; never offer to.`;
+
 type Card = { prompt: string; rubric: string; objective?: string };
 export type Action = { type: "cards"; cards: Card[] } | { type: "vocab"; words: { word: string; sentence?: string }[] } | { type: "lesson"; title: string; topic: string };
 export type Outcome = {
@@ -96,8 +100,10 @@ function addVocab(chat: Chat, words: { word: string; sentence?: string }[]): Out
   const list = (Array.isArray(words) ? words : []).map((w) => ({ word: str(w?.word), sentence: str(w?.sentence) })).filter((w) => w.word).slice(0, 10);
   if (!list.length) throw new Error("no words came back");
   const added: string[] = [], had: string[] = [];
+  // From a vocab chat the word was met in the chat, not in a course.
+  const inCourse = chat.course !== vocab.VOCAB;
   for (const w of list) {
-    const r = vocab.addWord({ word: w.word, context: w.sentence, course: chat.course, doc: chat.doc, title: chat.title });
+    const r = vocab.addWord({ word: w.word, context: w.sentence, course: inCourse ? chat.course : null, doc: inCourse ? chat.doc : null, title: inCourse ? chat.title : `Chat: ${chat.title ?? "vocabulary"}` });
     (r.existed ? had : added).push(r.word.id);
   }
   const names = list.map((w) => `“${w.word}”`).join(", ");

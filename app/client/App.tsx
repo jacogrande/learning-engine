@@ -22,8 +22,13 @@ function usePath() {
   return path.split("?")[0];
 }
 export function navigate(to: string) { history.pushState(null, "", to); dispatchEvent(new PopStateEvent("popstate")); }
+// A plain left click routes in place; a modified click or middle click is left to the browser,
+// so cmd/ctrl-click opens a new tab and shift-click a new window, as on any link.
 export const Link = ({ to, children, className, title }: { to: string; children: ReactNode; className?: string; title?: string }) => (
-  <a href={to} className={className} title={title} onClick={(e) => { e.preventDefault(); navigate(to); }}>{children}</a>
+  <a href={to} className={className} title={title} onClick={(e) => {
+    if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    e.preventDefault(); navigate(to);
+  }}>{children}</a>
 );
 
 export function App() {
@@ -59,7 +64,17 @@ export function NotFound({ crumbs = [], what = "page" }: { crumbs?: Crumb[]; wha
 // --- shell: top bar with breadcrumbs, theme ------------------------------
 type Crumb = { label: string; to?: string };
 
-export function Shell({ crumbs, children, className }: { crumbs: Crumb[]; children: ReactNode; className?: string }) {
+// The tab title follows the page: the page's own name first, then the course or area it sits in,
+// then the app. "Courses" is the root, so it is left out. Pages whose heading is not their last
+// crumb (a section inside a module) pass `title`.
+export function useTitle(...parts: (string | undefined)[]) {
+  const text = [...new Set(parts.filter((p): p is string => !!p && p !== "Courses")), "Learning"].join(" · ");
+  useEffect(() => { document.title = text; return () => { document.title = "Learning"; }; }, [text]);
+}
+
+export function Shell({ crumbs, children, className, title }: { crumbs: Crumb[]; children: ReactNode; className?: string; title?: string }) {
+  const labels = crumbs.map((c) => c.label).filter((l) => l !== "Courses");
+  useTitle(title ?? labels.at(-1), labels[0]);
   return (
     <>
       <header className="top">

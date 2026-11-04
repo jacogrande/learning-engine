@@ -10,7 +10,7 @@ import { state, migrate, rebuild } from "./server/state";
 import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, amendLog, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
-import { ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
+import { ACTIONS_SYSTEM, VOCAB_ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const q = (req: Request, key: string) => new URL(req.url).searchParams.get(key) ?? "";
@@ -75,7 +75,26 @@ const quoteBlock = (s: string) => s.split("\n").map((l) => `> ${l}`).join("\n");
 // Invariants for every tutor turn, including resumed ones, where the skill body is far back in context.
 const TUTOR_SYSTEM = `Your reply is shown to the learner verbatim. Produce exactly one reply and nothing else: no text before or between tool calls, no "I'll read…", no headings, no bullet lists unless listing is the point. Two to six sentences, laid out to be read in a narrow pane: short paragraphs of one to three sentences with a blank line between them (the direct answer first, then the mechanism or example), an example sentence on its own line as a \`>\` quote, and the question, if any, as its own last paragraph. Bold a term where you define it. At most one question per reply. Hold an answer back until the learner has made a real attempt; after that, give it straight. If they say something wrong, say so and why. Each learner message starts with its exchange number.`;
 
-// One chat turn: the first uses the /chat or /socratic skill with context; later turns resume the session.
+// What a chat about a word opens with: the entry as far as the learner has it, so the tutor needs no
+// file reads. The word's id is the chat's doc, `vocab/<id>`.
+function vocabChatBrief(doc: string) {
+  const w = vocab.getWord(doc.replace(/^vocab\//, ""));
+  if (!w?.entry) return "";
+  const e = w.entry;
+  const lines = [
+    `Word: ${e.headword} (${e.pos}${e.register ? `, ${e.register}` : ""}). Train rung ${w.stage} of ${vocab.DONE}${w.stage >= vocab.DONE ? " (through the ladder)" : ""}.`,
+    `Explanation: ${e.explanation}`,
+    e.confusable ? `Often confused with ${e.confusable.word}: ${e.confusable.difference}` : "",
+    e.neighbours?.length ? `Near-synonyms: ${e.neighbours.map((n) => `${n.word} (${n.difference})`).join("; ")}` : "",
+    e.family?.length ? `Family: ${e.family.map((k) => `${k.word}, ${k.relation}`).join("; ")}` : "",
+    e.parts ? `Parts: ${e.parts}` : "",
+    w.contexts.length ? `Where the learner met it:\n${w.contexts.slice(0, 3).map((c) => `> ${c.text}`).join("\n")}` : "",
+    e.examples.length ? `Example sentences:\n${e.examples.map((x) => `> ${x.sentence}`).join("\n")}` : "",
+  ].filter(Boolean);
+  return `${lines.join("\n")}\n\n`;
+}
+
+// One chat turn: the first uses the /chat, /vocab-chat or /socratic skill with context; later turns resume the session.
 function sendChat(chat: any, content: string, record = true) {
   const mid = id();
   if (record) {
@@ -87,6 +106,8 @@ function sendChat(chat: any, content: string, record = true) {
   const tag = chat.kind === "summary" ? `[Exchange ${turn} of 5] ` : `[Exchange ${turn}] `;
   const opener = chat.kind === "summary"
     ? `/socratic ${chat.course} ${chat.module}\n\n${chat.context ? `${chat.context}\n\n` : ""}`
+    : chat.kind === "vocab"
+    ? `/vocab-chat\n\n${vocabChatBrief(chat.doc)}${chat.context ? `What the learner is looking at in Train:\n${quoteBlock(chat.context)}\n\n` : ""}`
     : `/chat ${chat.course} ${chat.doc}\n\n${chat.context ? `${chat.context.startsWith("Question: ") ? "The learner's answer to a question in this section, and the grader's feedback on it. They want to discuss the feedback" : "Selected passage"}:\n${quoteBlock(chat.context)}\n\n` : ""}`;
   let prompt: string;
   if (chat.session_id) prompt = tag + content;
@@ -104,7 +125,7 @@ function sendChat(chat: any, content: string, record = true) {
   let text = "";
   enqueue(chat.course, "chat", prompt, {
     // Section chats can act in the app when asked (flashcards, vocab, a lesson); the wrap-up discussion cannot.
-    ref: chat.id, resume: chat.session_id ?? undefined, system: chat.kind === "summary" ? TUTOR_SYSTEM : `${TUTOR_SYSTEM}\n\n${ACTIONS_SYSTEM}`,
+    ref: chat.id, resume: chat.session_id ?? undefined, system: chat.kind === "summary" ? TUTOR_SYSTEM : chat.kind === "vocab" ? `${TUTOR_SYSTEM}\n\n${VOCAB_ACTIONS_SYSTEM}` : `${TUTOR_SYSTEM}\n\n${ACTIONS_SYSTEM}`,
     stream: (delta, reset) => { if (reset) { text = ""; broadcast({ type: "chat", chat: chat.id, reset: true }); } else { text += delta; broadcast({ type: "chat", chat: chat.id, delta }); } },
     then: async (result, job) => {
       const raw = typeof result === "string" && result.trim() ? result : text;
@@ -461,11 +482,11 @@ Bun.serve({
         state.chat(req.params.id);
         return json({ ok: true });
       },
-      // Section chats only: the wrap-up discussion is evidence for the module's understanding summary.
+      // Section and vocab chats only: the wrap-up discussion is evidence for the module's understanding summary.
       DELETE: (req) => {
         const c = db.query("SELECT kind FROM chats WHERE id=?").get(req.params.id) as any;
         if (!c) return json({ error: "not found" }, 404);
-        if (c.kind !== "section") return json({ error: "the wrap-up discussion cannot be deleted" }, 400);
+        if (c.kind !== "section" && c.kind !== "vocab") return json({ error: "the wrap-up discussion cannot be deleted" }, 400);
         db.run("DELETE FROM chats WHERE id=?", [req.params.id]);
         state.chatDeleted(req.params.id);
         broadcast({ type: "content" });
@@ -644,6 +665,20 @@ Bun.serve({
         try { return await word(req, (wid) => vocab.updateWord(wid, body)); } catch (e) { return json({ error: (e as Error).message }, 400); }
       },
       DELETE: (req) => word(req, (wid) => { if (!vocab.getWord(wid)) return null; vocab.deleteWord(wid); return { ok: true }; }),
+    },
+    // Chats about one word, from Train. Stored like section chats, under the vocab pseudo-course.
+    "/api/vocab/:id/chats": {
+      GET: (req) => word(req, (wid) => db.query("SELECT id, doc, kind, context, title, created_at createdAt FROM chats WHERE course=? AND doc=? AND kind='vocab' ORDER BY updated_at DESC").all(vocab.VOCAB, `vocab/${wid}`)),
+      POST: async (req) => {
+        const { context, message } = (await req.json()) as { context?: string; message: string };
+        return word(req, (wid) => {
+          const w = vocab.getWord(wid); if (!w) return null;
+          const chat = { id: id(), course: vocab.VOCAB, doc: `vocab/${wid}`, kind: "vocab", module: null, context: context ?? null, title: `${w.entry?.headword ?? w.word}: ${message.slice(0, 50)}`, session_id: null };
+          db.run("INSERT INTO chats (id, course, doc, kind, module, context, title, session_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)", [chat.id, chat.course, chat.doc, chat.kind, null, chat.context, chat.title, null, now(), now()]);
+          sendChat(chat, message);
+          return chatWithMessages(chat.id);
+        });
+      },
     },
     "/api/vocab/:id/family": { POST: async (req) => { const { word: kin } = (await req.json()) as { word: string }; try { return await word(req, (wid) => vocab.addKin(wid, String(kin ?? ""))); } catch (e) { return json({ error: (e as Error).message }, 400); } } },
     "/api/vocab/:id/regenerate": { POST: async (req) => word(req, async (wid) => { if (!vocab.getWord(wid)) return null; await vocab.enrich(wid); return { ok: true }; }) },

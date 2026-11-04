@@ -7,6 +7,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { get, post, put, useEvent } from "./api";
 import { Markdown } from "./Markdown";
 import { Link, Shell } from "./App";
+import { VocabChatPane } from "./Chat";
 import { DONE, Ladder, RUNGS, bold, inDialog, toast, type Counts, type Task } from "./Vocab";
 
 type Grade = { result: "correct" | "partial" | "wrong" | "skipped"; note: string };
@@ -32,6 +33,9 @@ export function TrainPage() {
   const [loadError, setLoadError] = useState(false);
   const tally = useRef<Record<string, Tally>>({});
   const [version, bump] = useState(0);
+  // A chat beside the card, about the card's word. What the card shows goes with the first message.
+  const [chat, setChat] = useState(false);
+  const [draft, setDraft] = useState<string | null>(null);
 
   const load = useCallback(async (fresh = false) => {
     setLoadError(false);
@@ -116,21 +120,37 @@ export function TrainPage() {
 
   if (!slot) return <Shell crumbs={crumbs} className="page train"><Summary tally={tally.current} queue={queue} counts={counts} criterion={criterion} again={() => load(true)} resend={endTurn} /></Shell>;
   const words = Object.keys(tally.current), done = words.filter((w) => tally.current[w].done).length;
+  const label = !isTask(slot) ? "" : slot.format === "meet" ? "new word" : slot.near ? "near-synonyms · extra practice" : slot.bonus ? "family · extra practice" : `${RUNGS[Math.min(slot.stage, DONE - 1)].toLowerCase()}${slot.stage >= DONE ? " · upkeep" : ""}`;
+  const askAbout = (text: string) => { setDraft(text); setChat(true); };
   return (
-    <Shell crumbs={crumbs} className="page train">
-      <div className="train-progress" role="progressbar" aria-label="Words done" aria-valuemin={0} aria-valuemax={words.length} aria-valuenow={done}><span style={{ width: `${(100 * done) / Math.max(1, words.length)}%` }} /></div>
-      {!isTask(slot) ? <p className="meta">Loading the next task…</p> : <>
-        <p className="meta">{done} of {words.length} words done · {slot.format === "meet" ? "new word" : slot.bonus ? "family · extra practice" : `${RUNGS[Math.min(slot.stage, DONE - 1)].toLowerCase()}${slot.stage >= DONE ? " · upkeep" : ""}`}</p>
-        {slot.format === "meet"
-          ? <Meet key={i} task={slot} onDone={() => onMet(slot)} />
-          : <Attempt key={i} i={i} task={slot} pending={pending?.i === i ? pending : null} onSent={(job) => setPending(job ? { i, job } : null)} onGraded={(g) => onGraded(slot, g)} onPass={pass} onNext={() => setI(i + 1)} />}
-      </>}
+    <Shell crumbs={crumbs} className={`page train ${chat ? "has-chat" : ""}`}>
+      <div className="train-main">
+        <div className="train-progress" role="progressbar" aria-label="Words done" aria-valuemin={0} aria-valuemax={words.length} aria-valuenow={done}><span style={{ width: `${(100 * done) / Math.max(1, words.length)}%` }} /></div>
+        {!isTask(slot) ? <p className="meta">Loading the next task…</p> : <>
+          <p className="meta">{done} of {words.length} words done · {label}</p>
+          {slot.format === "meet"
+            ? <Meet key={i} task={slot} onDone={() => onMet(slot)} onChat={askAbout} />
+            : <Attempt key={i} i={i} task={slot} pending={pending?.i === i ? pending : null} onSent={(job) => setPending(job ? { i, job } : null)} onGraded={(g) => onGraded(slot, g)} onPass={pass} onNext={() => setI(i + 1)} onChat={askAbout} />}
+        </>}
+      </div>
+      {chat && isTask(slot) && (
+        <aside className="train-chat" aria-label={`Chat about ${slot.headword}`}>
+          <div className="train-chat-head"><span className="kicker">Chat · {slot.headword}</span><button className="link" onClick={() => setChat(false)}>Close</button></div>
+          <VocabChatPane key={slot.word} wid={slot.word} draft={draft} onDraftUsed={() => setDraft(null)} />
+        </aside>
+      )}
     </Shell>
   );
 }
 
+// What a card shows, for the first message of a chat: the task, and the answer and grade once there is one.
+const cardText = (task: Task, answer?: string, grade?: Grade | null) =>
+  [task.format === "meet" ? `Meeting the word: ${task.anchor.sentence}` : `Task (${task.format}): ${task.prompt.replace(/\*\*/g, "")}`,
+    task.options ? `Choices: ${task.options.join(", ")}` : "",
+    answer ? `Learner's answer: ${answer}` : "", grade ? `Graded ${grade.result}. ${grade.note}` : ""].filter(Boolean).join("\n");
+
 // First meeting: the explanation and one clear sentence, nothing else to hold yet.
-function Meet({ task, onDone }: { task: Task; onDone: () => Promise<void> }) {
+function Meet({ task, onDone, onChat }: { task: Task; onDone: () => Promise<void>; onChat: (text: string) => void }) {
   const e = task.entry;
   const busy = useRef(false);
   const [error, setError] = useState(false);
@@ -152,13 +172,14 @@ function Meet({ task, onDone }: { task: Task; onDone: () => Promise<void> }) {
       <Markdown body={`> ${bold(task.anchor.sentence, task.anchor.form)}`} />
       {e.parts && <p className="muted">{e.parts}</p>}
       <div className="actions"><button className="primary" autoFocus onClick={go}>Got it →</button><span className="muted">Enter. You'll be asked it in sentences you haven't seen.</span>{error && <span className="muted" role="alert">That did not reach the server. Try again.</span>}</div>
+      <p className="meta keys"><button className="link" onClick={() => onChat(cardText(task))}>Chat about this word</button></p>
     </article>
   );
 }
 
 // One test: answer, check; then the full answer. Train asks no effort rating: the ladder moves on
 // correctness alone. A grade is waited for by its event, with polling as the fallback.
-function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: number; task: Task; pending: Pending | null; onSent: (job: string | null) => void; onGraded: (g: Grade) => void; onPass: () => void; onNext: () => void }) {
+function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext, onChat }: { i: number; task: Task; pending: Pending | null; onSent: (job: string | null) => void; onGraded: (g: Grade) => void; onPass: () => void; onNext: () => void; onChat: (text: string) => void }) {
   const dk = draftKey(i, task.word);
   const [value, setValue] = useState(() => store.get(dk) ?? "");
   const [picked, setPicked] = useState<number | null>(null);
@@ -189,7 +210,7 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
     return () => clearInterval(t);
   }, [phase]);
 
-  const choice = task.format === "pick" || task.format === "kin-pick";
+  const choice = task.format === "pick" || task.format === "kin-pick" || task.format === "near-pick";
   const answer = choice ? (picked !== null ? task.options![picked] : "") : value;
   const ready = !!answer.trim() && phase === "answer";
   const send = async (text: string) => {
@@ -198,6 +219,7 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
     try {
       const r = await post<{ job: string | null; result?: Grade["result"]; note?: string }>(`/api/vocab/${task.word}/answer`, {
         format: task.format, sentence: task.sentence, form: task.form, answer: text, mode: "train", result, probe: task.probe, kin: task.kin ? { word: task.kin.word, sense: task.kin.sense } : undefined,
+        near: task.near?.map((n) => ({ word: n.word, difference: n.difference })),
       });
       if (r.job) { job.current = r.job; onSent(r.job); }
       else if (r.result) land({ result: r.result, note: r.note ?? "" });
@@ -222,7 +244,7 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
   const right = grade?.result === "correct";
   return (
     <article className={`train-card ${grade ? `is-${grade.result}` : ""}`}>
-      <p className="kicker">{task.format === "pick" ? "Pick the word" : task.format === "recall" ? "Recall the word" : task.format === "explain" ? "Recall the meaning" : task.format === "kin-pick" ? "Pick from the family" : task.format === "kin-explain" ? "Work out a family member" : "Use it"}</p>
+      <p className="kicker">{task.format === "pick" ? "Pick the word" : task.format === "recall" ? "Recall the word" : task.format === "explain" ? "Recall the meaning" : task.format === "kin-pick" ? "Pick from the family" : task.format === "kin-explain" ? "Work out a family member" : task.format === "near-pick" ? "Which of these fits" : task.format === "near-explain" ? "Tell it from its neighbours" : "Use it"}</p>
       <div className="train-prompt" id={`prompt-${i}`}><Markdown body={task.prompt} /></div>
       {choice ? (
         <div className="quiz-options" role="radiogroup" aria-labelledby={`prompt-${i}`}>
@@ -257,9 +279,14 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
             <p><span className="quiz-status">{grade!.result}</span> {grade!.note}</p>
             {/* The full answer, every time: after a miss it is what does the teaching. */}
             <div className="train-answer">
-              {task.format === "pick" || task.format === "recall" || task.format === "kin-pick"
+              {task.format === "pick" || task.format === "recall" || task.format === "kin-pick" || task.format === "near-pick"
                 ? <Markdown body={`> ${bold(task.sentence, task.form)}`} />
                 : task.probe ? <p>{task.probe.answer}</p> : null}
+              {/* A near-synonym question's answer is the set told apart: each neighbour and what separates it. */}
+              {task.near && <>
+                {task.nearWord && <p><strong>{task.nearWord}</strong>{task.nearWord === task.headword ? ": the word itself." : `, not ${task.headword}.`}</p>}
+                <ul className="neighbours">{task.near.map((n) => <li key={n.word}><strong>{n.word}</strong>: {n.difference}</li>)}</ul>
+              </>}
               {/* A family question's answer is the member: its meaning, how it relates, an example. */}
               {task.kin ? <>
                 <p><strong>{task.kin.word}</strong> <span className="muted">{task.kin.relation}</span>: {task.kin.sense}</p>
@@ -272,7 +299,7 @@ function Attempt({ i, task, pending, onSent, onGraded, onPass, onNext }: { i: nu
           </div>
         )}
       </div>
-      <p className="meta keys">{choice ? `1–${task.options!.length} choose · ` : ""}Enter check / next{task.format !== "recall" && !choice ? " · Shift+Enter new line" : ""}</p>
+      <p className="meta keys">{choice ? `1–${task.options!.length} choose · ` : ""}Enter check / next{task.format !== "recall" && !choice ? " · Shift+Enter new line" : ""} · <button className="link" onClick={() => onChat(cardText(task, phase === "feedback" || phase === "grading" ? answer : undefined, grade))}>Chat about this word</button></p>
     </article>
   );
 }

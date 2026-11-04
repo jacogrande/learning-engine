@@ -11,6 +11,10 @@ export type Probe = { question: string; answer: string };
 // A word built on the same root (`bereave`, `bereavement` beside `bereft`). `separate`: its meaning has
 // drifted, or it is easily confused with the headword, so it is worth learning as its own word.
 export type Kin = { word: string; pos: string; relation: string; sense: string; example: Example | null; separate: boolean };
+// A near-synonym (`rob`, `pillage` beside `reave`): what separates it from the headword, and a sentence
+// where it, not the headword, is the word that fits, in its base form so the choices are not told
+// apart by grammar.
+export type Neighbour = { word: string; difference: string; example: Example | null };
 // `examples` teach: each makes the meaning inferable. `tests` only fit: a learner who does not know
 // the word cannot read its meaning off them, so they test the word, not inference. `forms` are the
 // headword's inflections, the only answers a fill-in accepts without the grader.
@@ -18,14 +22,18 @@ export type Entry = {
   headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[];
   confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[];
   family?: Kin[];   // absent on entries written before families existed; a background job fills it in
+  distractors?: string[];   // plausible wrong choices for Pick, outside the learner's list; a background job fills them in
+  neighbours?: Neighbour[];   // near-synonyms to tell apart once the word is known; filled in with the distractors
 };
 // `url`: the web page a word was captured from (the browser extension); course words have `doc` instead.
 export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };
 // The ladder's formats, and two occasional family questions that never move the ladder: choosing
 // which family member fits a sentence, and working out what a member means from the word.
-export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain";
+// Two more, from the Explain rung on, tell the word from its near-synonyms: choosing which of them
+// fits a sentence, and saying what separates them.
+export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain" | "near-pick" | "near-explain";
 // One line of a word's Train log: an attempt (with the sentence or probe asked), meet, or a ladder move.
-export type TrainLog = { at: string; format: Format | "climb" | "drop"; result?: string; answer?: string; note?: string; sentence?: string; probe?: string; kin?: string; stage?: number };
+export type TrainLog = { at: string; format: Format | "climb" | "drop"; result?: string; answer?: string; note?: string; sentence?: string; probe?: string; kin?: string; near?: string; stage?: number };
 export type VocabRow = {
   id: string; word: string; contexts: Context[]; course_term: string | null; entry: Entry | null; status: "pending" | "ready" | "failed";
   stage: number; trainLog: TrainLog[]; trained_at: string | null; created_at: string; updated_at: string;

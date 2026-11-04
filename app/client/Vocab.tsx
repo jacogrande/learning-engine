@@ -8,7 +8,8 @@ import { Link, Shell } from "./App";
 export type Example = { sentence: string; form: string };
 export type Probe = { question: string; answer: string };
 export type Kin = { word: string; pos: string; relation: string; sense: string; example: Example | null; separate: boolean };
-export type Entry = { headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[]; confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[]; family?: Kin[] };
+export type Neighbour = { word: string; difference: string; example: Example | null };
+export type Entry = { headword: string; pos: string; explanation: string; examples: Example[]; tests?: Example[]; forms?: string[]; confusable: { word: string; difference: string } | null; parts: string | null; register: string | null; probes?: Probe[]; family?: Kin[]; distractors?: string[]; neighbours?: Neighbour[] };
 export type Context = { text: string; form: string; course: string | null; doc: string | null; title: string | null; url?: string | null; at: string };
 export type Word = {
   id: string; word: string; contexts: Context[]; courseTerm: string | null; entry: Entry | null; status: "pending" | "ready" | "failed"; writing: boolean; stage: number;
@@ -16,12 +17,13 @@ export type Word = {
   card: { due: string; state: string; streak: number; suspended: boolean; reviews: number } | null;
 };
 export type Counts = { total: number; pending: number; failed: number; new: number; climbing: number; through: number; trainedToday: number; trainable: number; reviewFirst: number; held: number };
-export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain";
+export type Format = "meet" | "pick" | "recall" | "explain" | "use" | "kin-pick" | "kin-explain" | "near-pick" | "near-explain";
 // One Train task, as /api/vocab/train and /api/vocab/:id/task send it.
 export type Task = {
   word: string; format: Format; stage: number; headword: string; entry: Entry; contexts: Context[]; courseTerm: string | null;
   sentence: string; form: string; anchor: Example; prompt: string; hint?: string; options?: string[]; answer?: number; probe?: Probe;
   bonus?: boolean; kin?: Kin;   // a family question: extra practice, never counted toward the ladder
+  near?: Neighbour[]; nearWord?: string;   // a near-synonym question: the neighbours shown after, and for a pick the word that fits
 };
 export const VOCAB = "_vocab";   // the pseudo-course vocab cards live under
 export const RUNGS = ["Meet", "Pick", "Recall", "Explain", "Use"];
@@ -149,6 +151,9 @@ const hashId = () => /^#w-(.+)$/.exec(location.hash)?.[1] ?? null;
 // Pending with no job behind it: the job was lost with the last server process.
 const stuck = (w: Word) => w.status === "pending" && !w.writing;
 
+// The list alone until a word is chosen; then the list narrows into a nav on the left and the
+// word's entry fills the right. The chosen word is kept in the URL hash, so reload and links land
+// on it, without a history entry per click.
 export function VocabPage() {
   const { data, error, reload } = useLive<{ words: Word[]; counts: Counts }>("/api/vocab", ["vocab", "card", "job"]);
   const [q, setQ] = useState("");
@@ -160,7 +165,8 @@ export function VocabPage() {
     addEventListener("popstate", on); addEventListener("hashchange", on);
     return () => { removeEventListener("popstate", on); removeEventListener("hashchange", on); };
   }, []);
-  useEffect(() => { if (openId) requestAnimationFrame(() => document.getElementById(`w-${openId}`)?.scrollIntoView({ block: "center" })); }, [!!data, openId]);
+  useEffect(() => { if (openId) requestAnimationFrame(() => document.getElementById(`w-${openId}`)?.scrollIntoView({ block: "nearest" })); }, [!!data, openId]);
+  const select = (id: string | null) => { setOpenId(id); history.replaceState(null, "", id ? `/vocab#w-${id}` : "/vocab"); };
   const crumbs = [{ label: "Courses", to: "/" }, { label: "Vocabulary" }];
   if (!data) return (
     <Shell crumbs={crumbs} className="page"><h1>Vocabulary</h1>
@@ -171,24 +177,30 @@ export function VocabPage() {
   const shown = data.words.filter((w) =>
     (filter === "all" || (filter === "new" && w.status === "ready" && w.stage === 0) || (filter === "climbing" && w.stage > 0 && w.stage < DONE) || (filter === "through" && w.stage >= DONE) || (filter === "problems" && (w.status === "failed" || stuck(w) || w.card?.suspended)))
     && (!needle || [w.word, w.entry?.headword, w.entry?.explanation, ...w.contexts.map((x) => x.text)].some((t) => t?.toLowerCase().includes(needle))));
+  const selected = openId ? data.words.find((w) => w.id === openId) ?? null : null;
   return (
-    <Shell crumbs={crumbs} className="page vocab-page">
+    <Shell crumbs={crumbs} title={selected ? selected.entry?.headword ?? selected.word : undefined} className={`page vocab-page ${selected ? "is-split" : ""}`}>
       <div className="page-head"><h1>Vocabulary</h1>
         <div className="actions"><button onClick={() => dispatchEvent(new Event("vocab-add"))}>Add word</button><Link to="/vocab/train" className="btn primary">Train{c.trainable ? ` · ${c.trainable}` : ""}</Link></div>
       </div>
       <p className="meta">{c.total} words · {c.new} new · {c.climbing} climbing · {c.through} through the ladder{c.pending ? ` · ${c.pending} being written` : ""}{c.failed ? ` · ${c.failed} failed` : ""}{c.trainedToday ? ` · ${c.trainedToday} trained today` : ""}</p>
       {c.total === 0 ? (
         <p className="muted empty">No words yet. Select a word in a lesson and choose Vocab (or press V), or press Ctrl+V on any page.</p>
-      ) : <>
-        <div className="vocab-tools">
-          <input className="field" type="search" aria-label="Search words" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search words, meanings, sentences" />
-          <div className="theme" role="group" aria-label="Filter">{(["all", "new", "climbing", "through", "problems"] as Filter[]).map((f) => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f}</button>)}</div>
+      ) : (
+        <div className="vocab-cols">
+          <div className="vocab-side">
+            <div className="vocab-tools">
+              <input className="field" type="search" aria-label="Search words" value={q} onChange={(e) => setQ(e.target.value)} placeholder={selected ? "Search" : "Search words, meanings, sentences"} />
+              <div className="theme" role="group" aria-label="Filter">{(["all", "new", "climbing", "through", "problems"] as Filter[]).map((f) => <button key={f} aria-pressed={filter === f} onClick={() => setFilter(f)}>{f}</button>)}</div>
+            </div>
+            <ul className="vocab-list" aria-label="Words">
+              {shown.map((w) => <WordRow key={w.id} w={w} open={openId === w.id} select={() => select(openId === w.id ? null : w.id)} />)}
+            </ul>
+            {!shown.length && <p className="muted">Nothing matches.</p>}
+          </div>
+          {selected && <WordDetail key={selected.id} w={selected} all={data.words} reload={reload} close={() => select(null)} open={select} />}
         </div>
-        <ul className="vocab-list">
-          {shown.map((w) => <WordRow key={w.id} w={w} all={data.words} open={openId === w.id} toggle={() => setOpenId(openId === w.id ? null : w.id)} reload={reload} />)}
-        </ul>
-        {!shown.length && <p className="muted">Nothing matches.</p>}
-      </>}
+      )}
     </Shell>
   );
 }
@@ -198,37 +210,52 @@ export function Ladder({ stage }: { stage: number }) {
   return <span className="ladder" role="img" aria-label={label} title={label}>{RUNGS.map((r, i) => <i key={r} className={i < stage ? "on" : ""} />)}</span>;
 }
 
-function WordRow({ w, all, open, toggle, reload }: { w: Word; all: Word[]; open: boolean; toggle: () => void; reload: () => void }) {
-  const [editing, setEditing] = useState(false);
+const statusOf = (w: Word) => stuck(w) ? "entry interrupted" : w.status === "pending" ? "writing entry…" : w.status === "failed" ? "entry failed" : w.card?.suspended ? "suspended" : w.card ? (w.card.state === "learned" ? "learned" : rel(w.card.due)) : w.stage === 0 ? "meet it in Train" : "";
+
+// One line in the list. The word, its class, a one-line gloss, the ladder and the review status;
+// in the split view the gloss and status are hidden by CSS and the line is a nav item.
+function WordRow({ w, open, select }: { w: Word; open: boolean; select: () => void }) {
   const e = w.entry;
-  const name = e?.headword ?? w.word;
-  const status = stuck(w) ? "entry interrupted" : w.status === "pending" ? "writing entry…" : w.status === "failed" ? "entry failed" : w.card?.suspended ? "suspended" : w.card ? (w.card.state === "learned" ? "learned" : rel(w.card.due)) : w.stage === 0 ? "meet it in Train" : "";
-  const regenerate = () => post(`/api/vocab/${w.id}/regenerate`).then(reload, failed("Rewriting the entry"));
   return (
     <li id={`w-${w.id}`} className={`vocab-row ${open ? "is-open" : ""}`}>
-      <button className="vocab-head" onClick={toggle} aria-expanded={open} aria-controls={`wb-${w.id}`}>
-        <span className="vocab-word">{name}</span>
+      <a href={`/vocab#w-${w.id}`} className="vocab-head" aria-current={open ? "true" : undefined} onClick={(ev) => {
+        if (ev.defaultPrevented || ev.button !== 0 || ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey) return;
+        ev.preventDefault(); select();
+      }}>
+        <span className="vocab-word">{e?.headword ?? w.word}</span>
         {e?.pos && <span className="muted">{e.pos}</span>}
         <span className="vocab-def">{e?.explanation ?? ""}</span>
         <Ladder stage={w.stage} />
-        <span className="muted vocab-status">{status}</span>
-      </button>
-      {open && (
-        <div className="vocab-body" id={`wb-${w.id}`}>
-          {(w.status === "failed" || stuck(w)) && <p className="actions"><span className="muted">{w.status === "failed" ? "The entry could not be written." : "Writing the entry was cut off when the server stopped."}</span><button onClick={regenerate}>Try again</button></p>}
-          {e && !editing && <WordEntry w={w} />}
-          {e && !editing && <Family w={w} all={all} reload={reload} open={(id) => { location.hash = `w-${id}`; }} />}
-          {e && editing && <EditEntry w={w} done={() => { setEditing(false); reload(); }} />}
-          <div className="actions">
-            {e && !editing && <button onClick={() => setEditing(true)}>Edit</button>}
-            {e && w.status !== "pending" && <button onClick={() => { if (confirm("Rewrite the explanation and examples? Your edits will be replaced.")) regenerate(); }}>Rewrite entry</button>}
-            {w.contexts.some((c) => c.course) && <button className="link" onClick={() => put(`/api/vocab/${w.id}`, { courseTerm: w.courseTerm ? null : w.contexts.find((c) => c.course)!.course }).then(reload, failed("Changing the course-term mark"))}>{w.courseTerm ? "Not a course term" : "Mark as a course term"}</button>}
-            <span className="spacer" />
-            <button className="link" onClick={() => { if (confirm(`Delete “${name}” and its review history?`)) del(`/api/vocab/${w.id}`).then(reload, failed("Deleting")); }}>Delete</button>
-          </div>
-        </div>
-      )}
+        <span className="muted vocab-status">{statusOf(w)}</span>
+      </a>
     </li>
+  );
+}
+
+// The right column: the chosen word in full, its family, and the actions on it.
+function WordDetail({ w, all, reload, close, open }: { w: Word; all: Word[]; reload: () => void; close: () => void; open: (id: string) => void }) {
+  const [editing, setEditing] = useState(false);
+  const e = w.entry;
+  const name = e?.headword ?? w.word, status = statusOf(w);
+  const regenerate = () => post(`/api/vocab/${w.id}/regenerate`).then(reload, failed("Rewriting the entry"));
+  return (
+    <section className="vocab-detail" aria-label={name}>
+      <button className="link vocab-back" onClick={close}>← All words</button>
+      <h2 className="vocab-title">{name}</h2>
+      <p className="meta vocab-standing"><Ladder stage={w.stage} />{status && <span>{status}</span>}</p>
+      {(w.status === "failed" || stuck(w)) && <p className="actions"><span className="muted">{w.status === "failed" ? "The entry could not be written." : "Writing the entry was cut off when the server stopped."}</span><button onClick={regenerate}>Try again</button></p>}
+      {!e && w.status === "pending" && <p className="muted">Its entry is being written.</p>}
+      {e && !editing && <WordEntry w={w} />}
+      {e && !editing && <Family w={w} all={all} reload={reload} open={open} />}
+      {e && editing && <EditEntry w={w} done={() => { setEditing(false); reload(); }} />}
+      <div className="actions">
+        {e && !editing && <button onClick={() => setEditing(true)}>Edit</button>}
+        {e && w.status !== "pending" && <button onClick={() => { if (confirm("Rewrite the explanation and examples? Your edits will be replaced.")) regenerate(); }}>Rewrite entry</button>}
+        {w.contexts.some((c) => c.course) && <button className="link" onClick={() => put(`/api/vocab/${w.id}`, { courseTerm: w.courseTerm ? null : w.contexts.find((c) => c.course)!.course }).then(reload, failed("Changing the course-term mark"))}>{w.courseTerm ? "Not a course term" : "Mark as a course term"}</button>}
+        <span className="spacer" />
+        <button className="link" onClick={() => { if (confirm(`Delete “${name}” and its review history?`)) del(`/api/vocab/${w.id}`).then(() => { close(); reload(); }, failed("Deleting")); }}>Delete</button>
+      </div>
+    </section>
   );
 }
 
@@ -246,6 +273,10 @@ export function WordEntry({ w }: { w: Pick<Word, "entry" | "contexts" | "courseT
         <ul>{e.examples.map((x, i) => <li key={i}><Markdown body={bold(x.sentence, x.form)} /></li>)}</ul>
       </>}
       {e.confusable && w.stage >= 3 && <><h4>Not to be confused with {e.confusable.word}</h4><p>{e.confusable.difference}</p></>}
+      {!!e.neighbours?.length && w.stage >= 3 && <>
+        <h4>Near it in meaning</h4>
+        <ul className="neighbours">{e.neighbours.map((n) => <li key={n.word}><strong>{n.word}</strong>: {n.difference}</li>)}</ul>
+      </>}
       {e.parts && <><h4>Parts</h4><p>{e.parts}</p></>}
       {w.contexts.length > 0 && <>
         <h4>Where you met it</h4>

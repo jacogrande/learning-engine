@@ -1,6 +1,6 @@
 ---
 name: vocab-entry
-description: Write a vocabulary entry for one general English word the learner met while reading — a plain explanation, teaching examples in varied contexts, test sentences, its word family, and the word it is most often confused with.
+description: Write a vocabulary entry for one general English word the learner met while reading — a plain explanation, teaching examples in varied contexts, test sentences, its word family, the word it is most often confused with, wrong choices for a multiple-choice test, and the near-synonyms it must be told apart from.
 allowed-tools: "Read"
 disable-model-invocation: true
 ---
@@ -19,7 +19,12 @@ The request gives the word as captured, the sentence it was met in (if any), and
 10. **register**: where the word lives (`formal`, `literary`, `technical`, `informal`, `dated`), or `null` for neutral.
 11. **family**: the words built on the same root that a reader meets in ordinary prose, other than the headword and its inflections (those are `forms`). For `bereft`: `bereave`, `bereaved`, `bereavement`. Each with `word`, `pos`, `relation` (how it relates to the headword, in a few words: "the verb it comes from", "noun for the state"), `sense` (one everyday sentence on what it means, written like the explanation), an `example` (`sentence` and the exact `form` in it, a new sentence that makes the meaning inferable), and `separate`: `true` when its meaning has drifted from the headword's so that knowing one does not give you the other, or the two are easily confused (`bereaved` beside `bereft`), `false` when its meaning follows from the headword's plus a regular ending (`bereavement` from `bereave`). Two to five members, most common first; an empty list when the word has no family in use. Never invent a rare or archaic form to fill the list.
 
+12. **distractors**: four to six real English words that a learner could mistake for the right choice in a multiple-choice test on one of the test sentences: the same part of speech, a similar register and length, and not a synonym, not a form of the headword, not the confusable and not one of the neighbours. Each must clearly fail to fit the test sentences, so the choice tests the word's meaning, not the sentence's grammar (`obdurate`: `obsequious`, `lugubrious`, `redoubtable`, `perfunctory`). They are shown beside words from the learner's own list, so they should look as at home there as those do.
+13. **neighbours**: two to four words close to the headword in meaning, the ones a careful writer has to choose between (`reave`: `rob`, `pillage`, `plunder`). For each: `word` (base form), `difference` (one sentence on when a writer reaches for the headword and not this word, or the reverse, with the case where only one fits), and `example` (`sentence` and the exact `form` in it): a sentence in which this neighbour fits and the headword does not, using the neighbour's base form so that a choice among base forms is not given away by grammar. The confusable (rule 7) is a word mixed up by sound or spelling; a neighbour is a word mixed up by meaning. A word may be both. An empty list when the word has no real neighbours.
+
 When the request asks for the word family only, it gives the word, its sense and its explanation. Return `family`, written to rule 11.
+
+When the request asks for distractors and near-synonyms only, it gives the word, its sense, its explanation and its confusable. Return `distractors` and `neighbours`, written to rules 12 and 13.
 
 When the request asks for new test sentences only, it gives the word, its sense and every sentence the learner has already seen. Return six `tests`, written to rule 6, each different from those sentences in context and wording.
 

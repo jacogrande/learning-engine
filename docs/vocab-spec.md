@@ -45,6 +45,8 @@ A background job (`/vocab-entry`, `vocab` job, background lane) writes:
 - `examples`: four teaching sentences, one per learner domain where it fits, each making the meaning inferable, with the exact `form` used so it can be blanked. At least two are required.
 - `tests`: six test sentences that fit the word without explaining it, so a test measures knowing the word, not inferring it from context. The learner never sees one before being tested on it. Once every test sentence has been asked twice, a background job writes six new ones.
 - `confusable`: the one word most likely to be mixed up with it, and what separates them.
+- `distractors`: four to six real words outside the learner's list that could pass for the right choice in a Pick, matched for part of speech and register. Pick shows one or two beside words from the list, or more when the list is short, so a short list does not show the same few names every time.
+- `neighbours`: the two to four words closest in meaning (*reave*: *rob*, *pillage*, *plunder*), each with what separates it from the headword and a sentence that fits the neighbour alone. They are never Pick distractors, since a near-synonym might fit the sentence. Entries written before these existed get both from a background job when the server starts.
 - `parts`: word parts, only when they are a reliable hook.
 - `family`: the words on the same root met in ordinary prose (for *bereft*: *bereave*, *bereaved*, *bereavement*), each with its relation, an everyday sense, an example, and `separate` when its meaning has drifted or it is easily confused with the headword. Inflections stay in `forms`. The Vocabulary page lists the family under the entry; **Add as its own word** makes a member a word of its own, its example sentence taken as where it was met. Members are never added on their own: a card for every derivative would crowd review, and a derivative whose meaning follows from the base plus a regular ending needs no card. The member that is the word's confusable stays hidden until the Explain rung. Entries written before families existed get theirs from a background job when the server starts.
 - `probes`: four questions whose answer turns on the meaning ("Is an obdurate person easy to persuade? Why?") with a model answer.
@@ -83,7 +85,7 @@ Correctness is checked, never self-reported; the self-rating only separates corr
 | Rung | Task | Graded by |
 |---|---|---|
 | 0 Meet | The explanation and one anchor sentence: where the word was met, else the first example. Nothing else. | — |
-| 1 Pick | Choose the word that fits a test sentence, from four headwords in the same form (the headword's own form preferred), so grammar gives nothing away. Keys 1–4. | the page |
+| 1 Pick | Choose the word that fits a test sentence, from four headwords in the same form (the headword's own form preferred), so grammar gives nothing away. The wrong choices mix words from the list with the entry's own distractors. Keys 1–4. | the page |
 | 2 Recall | Type the word into a blanked sentence; first letter and length as the hint. | exact match, else Claude |
 | 3 Explain | Say what the word means in a new sentence. | Claude |
 | 4 Use | Answer the probe asked longest ago and not yet today ("Would…? Why?"); with none left, describe a real situation the word fits so the meaning shows. | Claude |
@@ -107,6 +109,19 @@ Occasional extra practice on a word's family, outside the ladder: they never cou
 - **Pick from the family** (once through the ladder): a member's example sentence with the blank, and the word and its family as the choices, so the forms whose meanings have split (*bereft*, *bereaved*) are told apart. The blank always takes the member's own form, so grammar gives nothing away.
 
 The full answer follows each: the member, how it relates to the word, its sense and an example.
+
+### Near-synonym questions
+
+From the Explain rung on, a word is told apart from its `neighbours`: extra practice outside the ladder, like family questions, at most three a session and one every four days per word, placed before the family questions. The two forms alternate:
+
+- **Which fits** (`near-pick`): a sentence that fits exactly one of the set, either a neighbour's own example or one of the word's test sentences, with the word and its neighbours as the choices, all in base form. Graded by the page.
+- **When to say it** (`near-explain`): "When would you say *reave* rather than *rob* or *pillage*? Say what separates them." Graded by Claude (`nuance` in `/grade-vocab`) against the differences.
+
+The full answer after each lists every neighbour with what separates it from the word.
+
+### Chat
+
+**Chat about this word** on a Train card opens a chat scoped to the word (`/vocab-chat`): the tutor gets the entry, the rung, and what the card shows, including the learner's answer and grade once there is one, so it can hold a task's answer back until the learner has tried. It can add words to the list when asked, nothing else. The chats are stored like section chats, under the `_vocab` pseudo-course with `doc` = `vocab/<id>`, and are listed on the card.
 
 ### Why these rules
 
@@ -143,6 +158,7 @@ The course Notebook lists the words captured in that course.
 | `PUT /api/vocab/train/session` | save the session in progress (`null` when finished) |
 | `GET /api/vocab/grades/:job` | a grade by job id, for a page that missed the event |
 | `GET /api/vocab/:id/task` | the next task for a word |
+| `GET/POST /api/vocab/:id/chats` | chats about a word; start one with `context` and `message` |
 | `POST /api/vocab/:id/meet` | met: rung 0 → 1; creates the review card |
 | `POST /api/vocab/:id/answer` | an attempt (`mode`: review or train); exact results return at once, the rest arrive as a `vgrade` event (a grade or an error) |
 | `POST /api/vocab/:id/finish` | end a word's turn in a session: climb, drop or stay |
