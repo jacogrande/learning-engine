@@ -9,6 +9,9 @@
 # solo. --quantize is divisions per quarter for a played (unquantized) MIDI file: 4 for sixteenths,
 # 3 for eighth triplets, 12 for both. --octave shifts every note by octaves (+1 to write a sounding
 # guitar line at guitar pitch for clef=treble-8). Output uses L:1/8; triplets are written (3abc.
+# --times (MIDI only) adds each bar's start in seconds from the file's start, read from its tempo map:
+# a Weimar Jazz Database file starts at the solo, so add the solo's "Position in Track" to place a
+# bar on the album track.
 import argparse
 from fractions import Fraction
 
@@ -22,6 +25,7 @@ ap.add_argument("--meter", default=None)
 ap.add_argument("--quantize", type=int, default=0)
 ap.add_argument("--octave", type=int, default=0)
 ap.add_argument("--summary", action="store_true")
+ap.add_argument("--times", action="store_true")
 a = ap.parse_args()
 
 # A MIDI file is quantized as it is read (music21's default is sixteenths and eighth triplets).
@@ -97,9 +101,35 @@ if a.summary:
         print("bar 1:", bar_text(measures[0]))
     raise SystemExit
 
+def bar_seconds():
+    # Seconds at each bar line, from the MIDI tempo map (the bar grid is the file's ticks per beat).
+    import mido
+    mf = mido.MidiFile(a.file)
+    events = sorted((abs_t, msg.tempo) for tr in mf.tracks for abs_t, msg in _abs(tr) if msg.type == "set_tempo")
+    num = int((a.meter or "4/4").split("/")[0])
+    out, tempo_now, t_prev, sec = [], 500000, 0, 0.0
+    total = max(abs_t for tr in mf.tracks for abs_t, _ in _abs(tr))
+    marks = list(range(0, total + mf.ticks_per_beat * num, mf.ticks_per_beat * num))
+    ei = 0
+    for mark in marks:
+        while ei < len(events) and events[ei][0] <= mark:
+            sec += mido.tick2second(events[ei][0] - t_prev, mf.ticks_per_beat, tempo_now); t_prev, tempo_now = events[ei][0], events[ei][1]; ei += 1
+        out.append(sec + mido.tick2second(mark - t_prev, mf.ticks_per_beat, tempo_now))
+    return out
+
+
+def _abs(track):
+    t = 0
+    for msg in track:
+        t += msg.time
+        yield t, msg
+
+
+times = bar_seconds() if (a.times and is_midi) else None
 lo, hi = 1, len(measures)
 if a.bars:
     lo, hi = (int(x) for x in (a.bars.split("-") + [a.bars])[:2])
 for n, m in enumerate(measures, 1):   # by position: a MIDI file has no bar numbers of its own
     if lo <= n <= hi:
-        print(f"bar {n}: {bar_text(m)} |")
+        at = f" @{times[n - 1]:.2f}s" if times and n - 1 < len(times) else ""
+        print(f"bar {n}{at}: {bar_text(m)} |")

@@ -15,9 +15,18 @@ Pick a passage of two to eight bars where the device the section teaches is audi
 
 ## 2. Prefer a source you can read exactly
 
+**Look in the Weimar Jazz Database first.** The Jazzomat Research Project (https://jazzomat.hfm-weimar.de) has note-for-note transcriptions of several hundred solos, across instruments and styles from swing to post-bop; its solo list is at https://jazzomat.hfm-weimar.de/dbformat/dbcontent.html, one synopsis page per solo (`…/dbformat/synopsis/soloNN.html`). Search the list for the players and tunes your device lives in. A synopsis page gives everything the passage needs:
+- the MIDI file (link "Download MIDI File"), which holds **only the solo**, concert pitch, with the real timing of every note. Its first bar may be an empty lead-in; the synopsis states the solo's bars and choruses, so count from the first bar with notes;
+- the chord changes of the solo, per chorus;
+- **Position in Track** (for example `00:40-01:53`) on a named album and label: where the solo sits on that issue of the track.
+
+Read the bars with `uv run --with music21 --with mido python scripts/read-score.py <file.mid> --bars <a>-<b> --quantize 2 --times`. `--times` prints each bar's start in seconds from the file's start; add the solo's start from Position in Track to get the time on the album track. Then find a YouTube upload of the same album track (the Topic channel for that album, or the same take): confirm with `scripts/check-notation.ts` that its length matches the album track's length within three seconds (look the length up on Discogs, MusicBrainz or the album listing). A matching upload carries the database's timing over, and that passes the time check in step 4.
+
+Otherwise, in this order:
+
 In this order:
 
-1. **Machine-readable**: MusicXML, `.mxl`, MIDI, or a MuseScore file exported to one of those. Download it and read it with `uv run --with music21 python scripts/read-score.py <file> --summary`, then `--bars <a>-<b>` for the passage. It prints the bars as ABC note text. For a played (unquantized) MIDI file, add `--quantize 2` for straight eighths (swing is set later with `%%MIDI swing`) or `--quantize 12` to keep triplets; a bracket of adjacent pitches such as `[G^GG]` is a grace note or a fast turn the quantizing collapsed: resolve it at `--quantize 12` or against a printed source. A file's bars are numbered from its first bar, so find the solo's start with the summary and the page.
+1. **Machine-readable** elsewhere: MusicXML, `.mxl`, MIDI, or a MuseScore file exported to one of those. Download it and read it with `uv run --with music21 python scripts/read-score.py <file> --summary`, then `--bars <a>-<b>` for the passage. It prints the bars as ABC note text. For a played (unquantized) MIDI file, add `--quantize 2` for straight eighths (swing is set later with `%%MIDI swing`) or `--quantize 12` to keep triplets; a bracket of adjacent pitches such as `[G^GG]` is a grace note or a fast turn the quantizing collapsed: resolve it at `--quantize 12` or against a printed source. A file's bars are numbered from its first bar, so find the solo's start with the summary and the page.
 2. **Notation printed on a web page or an engraved PDF**: notes and accidentals you can read cleanly in a crop. Render a PDF with `pdftoppm -r 300 -png`, crop the bars to their own image (`uv run --with pillow python -c "…"`), and Read the crop. A clean engraving can also be decoded against the staff lines with a short script (`uv run --with pymupdf --with numpy --with scipy python …`).
 3. **Not usable**: hand-written or cursive-font scores you cannot read note for note, scrolling-score videos, prose that describes notes without printing them, and your own recall. Skip the source and find another; there are always more recordings.
 
