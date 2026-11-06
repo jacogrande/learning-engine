@@ -49,7 +49,7 @@ export async function lint(course: string, mod: string): Promise<string[]> {
     }
     problems.push(...notation(doc.body).map((p) => `${f}: ${p}`));
     const words = doc.body.replace(/```[\s\S]*?```/g, "").replace(/:::[\s\S]*?:::/g, "").split(/\s+/).filter(Boolean).length;
-    if (sheet && fences.length < 8) problems.push(`${f}: ${fences.length} exercises; a worksheet has ten to fourteen`);
+    if (sheet && (fences.length < 5 || fences.length > 14)) problems.push(`${f}: ${fences.length} exercises; a worksheet has five to fourteen`);
     if (!sheet && f !== "quiz.md" && f !== "understanding.md" && words > 420) problems.push(`${f}: ${words} words of prose (ceiling 350)`);
   }
   return problems;

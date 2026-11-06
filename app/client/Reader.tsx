@@ -31,14 +31,18 @@ const KIND: Record<string, string> = { drilldown: "Drill-down", reading: "Readin
 const TAG: Record<string, string> = { drilldown: "↓", reading: "≡", worksheet: "✎" };
 
 // The end of a section (and of each worksheet made from it): its worksheets, and a button to make
-// one. A worksheet is a page of ten to fourteen exercises on the section, aimed at what the learner
-// missed in its questions; it opens from the sidebar, under the section, when the job is done.
+// one. A worksheet is a page of exercises on the section (the size toggle: 5, 10 or 14), aimed at
+// what the learner missed in its questions; it opens from the sidebar, under the section, when done.
+const SIZES = [{ n: 5, label: "Short" }, { n: 10, label: "Medium" }, { n: 14, label: "Full" }];
 function Practice({ slug, here, section, mod, writing }: { slug: string; here: string; section: string; mod: Course["modules"][number]; writing: boolean }) {
   const sheets = mod.extras.filter((e) => e.kind === "worksheet" && e.section === section);
   const [asked, setAsked] = useState(false);
+  // The size last chosen, remembered in this browser.
+  const [size, setSize] = useState<number>(() => { try { return Number(localStorage.getItem("worksheetSize")) || 10; } catch { return 10; } });
+  const pick = (n: number) => { setSize(n); try { localStorage.setItem("worksheetSize", String(n)); } catch {} };
   const make = () => {
     setAsked(true);
-    post(`/api/courses/${slug}/worksheet`, { doc: `modules/${mod.id}/${section}` })
+    post(`/api/courses/${slug}/worksheet`, { doc: `modules/${mod.id}/${section}`, size })
       .then(() => toast("Writing a worksheet. It appears under this section when ready; this takes a minute or two."), () => { setAsked(false); toast("The worksheet could not be started. Try again.", null, true); });
   };
   useEffect(() => { if (!writing) setAsked(false); }, [writing]);
@@ -48,8 +52,11 @@ function Practice({ slug, here, section, mod, writing }: { slug: string; here: s
       <p className="kicker">Practice</p>
       {sheets.length > 0 && <ul className="practice-sheets">{sheets.map((e) => <li key={e.file}><Link to={`${here}/${e.file}`}>{TAG.worksheet} {e.title}</Link></li>)}</ul>}
       <div className="actions">
+        <span className="confidence" role="group" aria-label="Worksheet size">
+          {SIZES.map((s) => <button key={s.n} type="button" aria-pressed={size === s.n} disabled={busy} onClick={() => pick(s.n)} title={`${s.n} exercises`}>{s.label}</button>)}
+        </span>
         <button onClick={make} disabled={busy}>{busy ? "Writing a worksheet…" : sheets.length ? "Make another worksheet" : "Make a worksheet"}</button>
-        <span className="muted">Ten or more exercises on this section, weighted toward what you missed.</span>
+        <span className="muted">{size} exercises on this section, weighted toward what you missed.</span>
       </div>
     </section>
   );

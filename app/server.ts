@@ -552,13 +552,15 @@ Bun.serve({
     // the section's own questions. `doc` is the section, or a worksheet made from it (another one).
     "/api/courses/:slug/worksheet": {
       POST: async (req) => {
-        const slug = req.params.slug, { doc: from } = (await req.json()) as { doc: string };
+        const slug = req.params.slug, { doc: from, size: asked } = (await req.json()) as { doc: string; size?: number };
+        // How many exercises the learner asked for (the size toggle); without one, the skill's ten to fourteen.
+        const size = Number.isInteger(asked) ? Math.min(14, Math.max(5, asked!)) : null;
         const doc = from?.includes("/worksheets/") ? `modules/${from.split("/")[1]}/${(await getDoc(slug, from))?.frontmatter.section ?? ""}` : from;
         if (!/^modules\/[^/]+\/\d\d-[^/]+\.md$/.test(doc ?? "") || !(await getDoc(slug, doc))) return json({ error: "a section is needed" }, 400);
         const rows = db.query("SELECT question, answer, result FROM answers WHERE course=? AND doc=?").all(slug, doc) as any[];
         const answers = rows.length ? rows.map((r) => `- ${r.question}: ${r.result ?? "not graded yet"}. Answer: ${String(r.answer).replace(/\s+/g, " ").slice(0, 300)}`).join("\n") : "None yet.";
         const mod = doc.split("/")[1];
-        return json(enqueue(slug, "worksheet", `/make-worksheet ${slug} ${doc}\n\nThe learner's answers to this section's questions:\n${answers}`, {
+        return json(enqueue(slug, "worksheet", `/make-worksheet ${slug} ${doc}\n\n${size ? `Size: exactly ${size} exercises.\n\n` : ""}The learner's answers to this section's questions:\n${answers}`, {
           ref: doc, then: (_r, job) => { announceExtra(slug, doc, "worksheet", job.startedAt); lintModule(slug, mod); },
         }));
       },
