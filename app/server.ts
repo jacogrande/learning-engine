@@ -433,6 +433,29 @@ Bun.serve({
       },
     },
 
+    // Stop a lesson answer's grade before it lands (the learner thought of something). The answer
+    // and grade from before this check come back out of `history`; with none, the row goes. A grade
+    // that already landed stands: `cancelled: false`.
+    "/api/courses/:slug/answers/:question/cancel": {
+      POST: (req) => {
+        const { slug, question: qid } = req.params;
+        const row = db.query("SELECT doc, job, result, note, history FROM answers WHERE course=? AND question=?").get(slug, qid) as any;
+        if (!row?.job || row.result || row.note || !jobs().some((j) => j.id === row.job)) return json({ cancelled: false });
+        cancel(row.job);
+        const history = JSON.parse(row.history ?? "[]"), prev = history.pop();
+        if (prev) {
+          db.run("UPDATE answers SET answer=?, result=?, note=?, confidence=?, graded_at=?, history=?, job=NULL, updated_at=? WHERE course=? AND question=?",
+            [prev.answer, prev.result ?? null, prev.note ?? null, prev.confidence ?? null, prev.gradedAt ?? null, JSON.stringify(history), now(), slug, qid]);
+          state.answer(slug, qid);
+        } else {
+          db.run("DELETE FROM answers WHERE course=? AND question=?", [slug, qid]);
+          state.answerDeleted(slug, qid);
+        }
+        broadcast({ type: "answer", course: slug, doc: row.doc, question: qid });
+        return json({ cancelled: true });
+      },
+    },
+
     // --- highlights -----------------------------------------------------
     "/api/courses/:slug/annotations": {
       GET: (req) => json(db.query("SELECT id, doc, quote, prefix, suffix, created_at createdAt FROM annotations WHERE course=? AND doc=? ORDER BY created_at").all(req.params.slug, q(req, "doc"))),
@@ -624,6 +647,17 @@ Bun.serve({
         const review = rate(course, qid, doc, result, confidence, vi, { answer, log });
         broadcast({ type: "card", course, question: qid });
         return json({ ok: true, job: null, review });
+      },
+    },
+    // Stop a review answer's grade before it lands: the card is not rated and can be answered again.
+    "/api/review/answer/cancel": {
+      POST: async (req) => {
+        const { course, question: qid } = (await req.json()) as { course: string; question: string };
+        const key = `${course}:${qid}`, job = pendingReviewGrades.get(key);
+        if (!job || !jobs().some((j) => j.id === job)) return json({ cancelled: false });
+        pendingReviewGrades.delete(key);
+        cancel(job);
+        return json({ cancelled: true });
       },
     },
     "/api/review/cards/:course/:question": (req) => { const c = cardStatus(req.params.course, req.params.question); return c ? json(c) : json({ error: "not found" }, 404); },

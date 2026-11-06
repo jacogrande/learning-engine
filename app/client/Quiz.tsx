@@ -21,7 +21,8 @@ export type QuestionResult = { result: Result; note: string };
 export const QuizReview = createContext<{ sheet: Sheet; results: Record<string, QuestionResult> } | null>(null);
 // `scale` replaces the confidence labels (vocab cards ask how hard the recall was instead).
 // `chat`, where a chat pane exists, opens a chat seeded with the question, the answer and its feedback.
-export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[]; chat?: (context: string) => void } | null>(null);
+// `cancel` stops a short answer's grade in flight; it resolves false when the grade already landed.
+export const QuizGrade = createContext<{ saved: Record<string, Answer>; submit: (spec: QuizSpec, answer: string, confidence: number) => void; scale?: string[]; chat?: (context: string) => void; cancel?: (spec: QuizSpec) => Promise<boolean> } | null>(null);
 
 const CONFIDENCE = ["Guessing", "Fairly sure", "Sure"];
 
@@ -82,6 +83,9 @@ function Live({ spec }: { spec: QuizSpec }) {
   const sureAndWrong = !grade?.scale && status === "wrong" && (saved?.confidence ?? confidence) === 3;
 
   const check = () => { setChecked(true); grade?.submit(spec, v, confidence); };
+  // Back to editing, with the text kept: the grade is dropped and nothing is rated.
+  const [cancelling, setCancelling] = useState(false);
+  const cancel = () => { setCancelling(true); grade?.cancel?.(spec).then((ok) => { if (ok) setChecked(false); }, () => {}).finally(() => setCancelling(false)); };
 
   return (
     <div className={`quiz ${status ? `is-${status}` : ""}`}>
@@ -117,6 +121,7 @@ function Live({ spec }: { spec: QuizSpec }) {
             </span>
           )}
           <button className="primary" onClick={check} disabled={!v || checked || needConfidence} title={needConfidence ? (grade?.scale ? "Rate how hard the recall was first" : "Pick how sure you are first") : undefined}>{grading ? "Grading…" : "Check"}</button>
+          {grading && grade?.cancel && <button type="button" onClick={cancel} disabled={cancelling} title="Stop grading and keep editing this answer">{cancelling ? "Cancelling…" : "Cancel"}</button>}
           {spec.type === "short" && grade && !checked && saved && (saved.failed ? <span className="muted" role="alert">{saved.note}</span> : <span className="muted">Edited since last check</span>)}
         </div>
       )}

@@ -184,6 +184,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
     const result = spec.type === "mcq" ? (answer === String(spec.answer) ? "correct" : "wrong") : undefined;
     post(`/api/courses/${slug}/answers`, { question: spec.id, doc: docPath, answer, type: spec.type, result, confidence }).then(() => { reloadAnswers(); reloadProgress(); });   // answering may finish the section
   }, [slug, docPath, reloadAnswers, reloadProgress]);
+  const cancel = useCallback((spec: QuizSpec) => post<{ cancelled: boolean }>(`/api/courses/${slug}/answers/${spec.id}/cancel`).then((r) => { reloadAnswers(); return r.cancelled; }), [slug, reloadAnswers]);
 
   const crumbs = [{ label: "Courses", to: "/" }, { label: course?.title ?? slug, to: `/c/${slug}` }];
   if (courseError) return <NotFound crumbs={[{ label: "Courses", to: "/" }]} what="course" />;
@@ -301,7 +302,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
                 <p>Every question is answered. The wrap-up asks you to explain the module from memory, then discuss it.</p>
               </div>
             )}
-            <QuizGrade value={{ saved, submit, chat: (context) => { setChatDraft(context); openPane("chat"); } }}>
+            <QuizGrade value={{ saved, submit, cancel, chat: (context) => { setChatDraft(context); openPane("chat"); } }}>
               <Markdown body={doc.body} />
             </QuizGrade>
             {(isSection || extra?.kind === "worksheet") && <Practice slug={slug} here={here} section={isSection ? current! : extra!.section ?? ""} mod={mod} writing={jobs.some((j) => j.kind === "worksheet" && j.ref === `modules/${moduleId}/${isSection ? current : extra?.section}`)} />}

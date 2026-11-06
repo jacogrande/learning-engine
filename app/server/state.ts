@@ -36,6 +36,7 @@ export const state = {
     const r = db.query("SELECT id, course, doc, quote, prefix, suffix, created_at createdAt FROM annotations WHERE id=?").get(id);
     if (r) save(file("annotations", id), r);
   },
+  answerDeleted: (course: string, question: string) => remove(file("answers", course, question)),
   annotationDeleted: (id: string) => remove(file("annotations", id)),
   chat: (id: string) => {
     const c = db.query("SELECT id, course, doc, kind, module, context, title, created_at createdAt, updated_at updatedAt FROM chats WHERE id=?").get(id) as any;

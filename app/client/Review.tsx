@@ -43,6 +43,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
   const sessionRef = useRef<Promise<Session> | null>(null);
   const tally = useRef({ reviewed: 0, correct: 0, sureWrong: 0, pending: new Set<string>() });
   const timers = useRef<Record<string, ReturnType<typeof setInterval>>>({});
+  const sending = useRef<Record<string, Promise<unknown>>>({});   // a short answer on its way to the grader, by card
 
   const load = useCallback(async () => {
     const params = new URLSearchParams({ mode });
@@ -85,6 +86,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     syncSession();   // count the answer now: the learner may leave before the grade lands
     if (it.course === VOCAB) return void ensureSession().then((s) => submitVocab(it, answer, confidence, pending, s.id));
     const sent = ensureSession().then((s) => post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant, session: s.id }));
+    sending.current[key(it)] = sent;
     sent.then((r) => {
       if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
@@ -119,6 +121,22 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
         }, () => { if (++tries > 120) fail("The server cannot be reached. Check again."); }), 1500);
       }, (e) => fail(typeof e === "number" ? `The answer was refused (${e}). Check again.` : "The server cannot be reached. Check again."));
   };
+
+  // Stop a short answer's grade: once the answer has reached the server, cancel its job; the card is
+  // not rated, leaves the tally, and can be answered again. False if the grade already landed.
+  const cancel = useCallback(async (spec: QuizSpec) => {
+    if (!item) return false;
+    const it = item, k = key(it);
+    await sending.current[k]?.catch(() => {});
+    const r = await post<{ cancelled: boolean }>("/api/review/answer/cancel", { course: it.course, question: it.question });
+    if (!r.cancelled) return false;
+    clearInterval(timers.current[k]);
+    const t = tally.current;
+    if (t.pending.delete(k)) t.reviewed--;
+    setSaved((s) => { const n = { ...s }; delete n[k]; return n; });
+    syncSession();
+    return true;
+  }, [item]);
 
   const next = () => { if (i + 1 >= (q?.items.length ?? 0)) syncSession(true); setI(i + 1); };
   const suspend = async () => { if (!item) return; await post(`/api/review/cards/${item.course}/${item.question}/suspend`, { suspended: true }); next(); };
@@ -202,7 +220,7 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
         <span>{(!slug || isVocab) && `${item.courseTitle} · `}{sectionLabel === "a word" ? sectionLabel : <Link to={sectionLink}>{sectionLabel}</Link>}{item.streak > 0 ? ` · ${item.streak} in a row` : ""}{item.sureWrong ? " · sure and wrong last time" : ""}</span>
       </p>
       {showOriginal && <blockquote className="source-quote">{item.original.prompt}</blockquote>}
-      <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit, scale: isVocab ? DIFFICULTY : undefined }}>
+      <QuizGrade value={{ saved: answered ? { [item.spec.id]: answered } : {}, submit, cancel: isVocab ? undefined : cancel, scale: isVocab ? DIFFICULTY : undefined }}>
         <Quiz key={`${key(item)}:${item.variant ?? "o"}`} spec={item.spec} />
       </QuizGrade>
       {isVocab && graded && item.vocab && (
