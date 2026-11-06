@@ -253,10 +253,11 @@ export const wantsVariant = (course: string, question: string, reviews: number, 
 export const markVariantPending = (course: string, question: string, pending: boolean) => { const k = `${course}:${question}`; pending ? pendingVariants.add(k) : pendingVariants.delete(k); };
 export const markVariantFailed = (course: string, question: string) => { const k = `${course}:${question}`; variantAttempts.set(k, (variantAttempts.get(k) ?? 0) + 1); };
 
-// Which wording to ask this time: the original on the first review and one time in four after that,
-// else the variant after the one asked last.
+// Which wording to ask this time: a variant whenever one exists, from the first review on (the
+// learner rebuilds the idea on a new case instead of recalling the answer they wrote), with the
+// original one time in four after that; else the variant after the one asked last.
 function pickVariant(reviews: number, lastVariant: number, variants: Variant[], prefer: boolean): number | null {
-  if (!variants.length || reviews < 2) return null;
+  if (!variants.length || reviews < 1) return null;
   if (!prefer && reviews % 4 === 3) return null;
   return (lastVariant + 1) % variants.length;
 }
@@ -364,11 +365,28 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   // Ask for variants in the background for cards that will be seen again, a few per load.
   let asked = 0;
   for (const it of items) if (it.course !== VOCAB && asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
+  // And for cards coming due in the next two days that have none yet, so the variant is ready when they are.
+  if (asked < VARIANTS_PER_LOAD) {
+    const soon = db.query(`SELECT course, question, doc FROM cards WHERE suspended=0 AND state<>'orphaned' AND course<>'${VOCAB}' AND log<>'[]' AND variants='[]' AND due<=? ORDER BY due LIMIT 20`).all(new Date(Date.now() + 2 * 864e5).toISOString()) as any[];
+    for (const r of soon) { if (asked >= VARIANTS_PER_LOAD) break; if (await requestVariant(r.course, r.question, r.doc)) asked++; }
+  }
   // Daily `remaining`: due cards the day's budget leaves for tomorrow.
   return { mode, scope: opts.scope ?? null, items, dueCount: totalDue, remaining: Math.max(0, totalDue - excl.size - items.length + topped), topped, next, doneToday: doneToday() };
 }
 let onVariantWanted: ((it: QueueItem) => void) | null = null;
 export const setVariantHook = (fn: (it: QueueItem) => void) => { onVariantWanted = fn; };
+
+// Ask for a card's next variant now, outside a queue: when a lesson answer creates the card, so its
+// first review can be asked on a new case. True if a variant job was started.
+export async function requestVariant(course: string, qid: string, doc: string): Promise<boolean> {
+  if (course === VOCAB || !onVariantWanted) return false;
+  const r = db.query("SELECT log, variants FROM cards WHERE course=? AND question=?").get(course, qid) as any;
+  if (!r || !wantsVariant(course, qid, JSON.parse(r.log).length, JSON.parse(r.variants ?? "[]").length)) return false;
+  const spec = await question(course, doc, qid);
+  if (!spec) return false;
+  onVariantWanted({ course, question: qid, doc, original: spec } as QueueItem);
+  return true;
+}
 
 // Weak spots: a lapse in the last 30 days, an objective partial/unmet in understanding.md, or a
 // question listed in learner.md errors.

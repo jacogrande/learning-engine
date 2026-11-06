@@ -7,7 +7,7 @@ import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
 import { state, migrate, rebuild } from "./server/state";
-import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, amendLog, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
+import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, amendLog, requestVariant, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
 import { ACTIONS_SYSTEM, VOCAB_ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
@@ -418,7 +418,7 @@ Bun.serve({
             const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobId]);
             if (!r.changes) return;
             state.answer(slug, qid);
-            if (firstRating) rate(slug, qid, doc, g.result, confidence);
+            if (firstRating) { rate(slug, qid, doc, g.result, confidence); requestVariant(slug, qid, doc); }
             broadcast({ type: "answer", course: slug, doc, question: qid });
           });
         }
@@ -427,6 +427,7 @@ Bun.serve({
           [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, JSON.stringify(history), now(), type === "mcq" ? now() : null]);
         state.answer(slug, qid);
         const review = type === "mcq" && result && firstRating ? rate(slug, qid, doc, result as any, confidence) : null;
+        if (review) requestVariant(slug, qid, doc);
         if (review) broadcast({ type: "card", course: slug, question: qid });
         return json({ ok: true, job, review });
       },
