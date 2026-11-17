@@ -172,6 +172,7 @@ function Courses() {
   // The New course dialog: closed (undefined), or open for a folder (null is the top level).
   const [newIn, setNewIn] = useState<string | null | undefined>(undefined);
   const { data: folders } = useLive<string[]>("/api/folders");
+  const { data: sync } = useLive<SyncStatus>("/api/sync", ["sync"]);
   const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer", "card"]);
   return (
     <Shell crumbs={[{ label: "Courses" }]} className="page page-wide">
@@ -193,7 +194,9 @@ function Courses() {
       )}
       {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — {j.kind === "brief" ? "researching the topic and planning the brief; the module writes itself after" : "researching the subject and writing the baseline"}. It appears in the browser below when ready ({j.activity ?? "queued"}).</p>)}
       {data?.length === 0 && starting.length === 0 && newIn === undefined && !folders?.length && (
-        <p className="muted">No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
+        <p className="muted">{sync && !sync.repo
+          ? <>No learning library is set up on this machine. In a terminal, in the engine folder, run <code>claude</code> and type <code>/start-learning</code>.</>
+          : <>No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</>}</p>
       )}
       {data && (data.length > 0 || !!folders?.length) && <Browser courses={data} folders={folders ?? []} onNewCourse={setNewIn} />}
     </Shell>

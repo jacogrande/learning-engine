@@ -2,6 +2,8 @@
 
 A personal course system. Claude Code researches a subject, writes the course as Markdown under `library/content/courses/<slug>/`, and the app at `bun run dev` renders it. You are the content engine.
 
+This repo is the engine. `library/` is the learner's own git repo (content, notes, state), ignored here; the app commits and pushes it. `/start-learning` sets it up on a new machine. Never commit library files to the engine repo.
+
 ## Layout of a course
 
 ```
