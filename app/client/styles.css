@@ -914,3 +914,40 @@ img.lesson-image { display: block; max-width: 100%; height: auto; margin: var(--
 .rich-field .notes-editor.rich-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-fill) 45%, transparent); }
 .rich-field .notes-editor.rich-input p, .rich-field .notes-editor.rich-input ul, .rich-field .notes-editor.rich-input ol, .rich-field .notes-editor.rich-input blockquote { margin: 0; }
 .rich-field .notes-editor.rich-input li > p { margin: 0; }
+
+/* code questions: the editor, a run's output, a solution */
+.code-editor { border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); overflow: hidden; font-size: var(--fs-ui); transition: border-color var(--fast), box-shadow var(--fast); }
+.code-editor:focus-within { border-color: var(--fg); box-shadow: 0 0 0 2px color-mix(in srgb, var(--fg) 12%, transparent); }
+.code-editor .cm-editor { background: transparent; color: var(--fg); max-height: 360px; }
+.code-editor .cm-editor.cm-focused { outline: none; }
+.code-editor .cm-scroller { font-family: var(--mono); line-height: 1.55; min-height: 5.5em; }
+.code-editor .cm-content { caret-color: var(--fg); padding: var(--s-2) 0; }
+.code-editor .cm-cursor { border-left-color: var(--fg); }
+.code-editor .cm-gutters { background: var(--code); color: var(--muted); border-right: var(--hairline) solid var(--faint); }
+.code-editor .cm-activeLine { background: color-mix(in srgb, var(--fg) 4%, transparent); }
+.code-editor .cm-activeLineGutter { background: color-mix(in srgb, var(--fg) 6%, transparent); color: var(--fg); }
+.code-editor .cm-selectionBackground, .code-editor .cm-focused .cm-selectionBackground, .code-editor .cm-content ::selection { background: color-mix(in srgb, var(--accent-fill) 40%, transparent) !important; }
+.code-editor .cm-matchingBracket { background: color-mix(in srgb, var(--accent-fill) 35%, transparent); outline: none; }
+.code-editor .cm-placeholder { color: var(--muted); }
+.tok-keyword, .tok-operatorKeyword, .tok-modifier { color: var(--accent); font-weight: 600; }
+.tok-string, .tok-string2 { color: color-mix(in srgb, var(--ok) 85%, var(--fg)); }
+.tok-number, .tok-bool, .tok-atom { color: color-mix(in srgb, var(--bad) 80%, var(--fg)); }
+.tok-comment { color: var(--muted); font-style: italic; }
+.tok-typeName, .tok-className { color: var(--fg); font-style: italic; }
+.tok-propertyName, .tok-variableName2 { color: var(--fg); }
+.tok-punctuation, .tok-operator { color: var(--muted); }
+.code-run { margin-top: var(--s-2); }
+.code-output { margin: var(--s-3) 0 0; font-size: var(--fs-small); }
+.code-output > p { margin: var(--s-1) 0 0; }
+pre.code-output.is-error { padding: var(--s-2) var(--s-3); border-left: var(--rule) solid var(--bad); background: var(--code); white-space: pre-wrap; font-family: var(--mono); }
+.code-table { max-height: 280px; overflow: auto; border: var(--hairline) solid var(--faint); border-radius: var(--radius-1); }
+.code-table table { margin: 0; border-collapse: collapse; width: max-content; min-width: 100%; font-family: var(--mono); font-size: var(--fs-small); }
+.code-table th, .code-table td { padding: 3px var(--s-3); border-bottom: var(--hairline) solid var(--faint); text-align: left; white-space: nowrap; }
+.code-table th { position: sticky; top: 0; background: var(--code); font-weight: 600; }
+.code-table td.is-num { text-align: right; font-variant-numeric: tabular-nums; }
+.code-table td.is-null { color: var(--muted); font-style: italic; }
+.quiz-code { margin: 0; padding: var(--s-2) var(--s-3); background: var(--code); border-radius: var(--radius-2); overflow-x: auto; font-size: var(--fs-small); }
+.quiz-solution { margin-top: var(--s-3); font-size: var(--fs-ui); }
+.quiz-solution summary { cursor: pointer; color: var(--muted); }
+.quiz-solution pre { margin-top: var(--s-2); }
+.quiz-solution.code-data { margin: 0 0 var(--s-2); }

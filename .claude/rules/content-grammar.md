@@ -116,7 +116,7 @@ A leaf directive embeds a player for one passage of a YouTube video: it plays fr
 
 ## Questions
 
-A fenced `quiz` block with a YAML body. Every section ends with one to three. Default `short`; `mcq` only when the distractors are confusions worth telling apart.
+A fenced `quiz` block with a YAML body. Every section ends with one to three. Default `short`; `mcq` only when the distractors are confusions worth telling apart; `code` whenever the answer is code the learner writes (a query, a function, a command), so they write it in an editor instead of a text box.
 
 ````markdown
 ```quiz
@@ -148,12 +148,56 @@ explanation: >-
 ```
 ````
 
+A `code` question for SQL runs. The app loads `setup` into a fresh SQLite database, runs the learner's code and the `solution`, and compares the rows they return: a match is correct at once; a mismatch or an error goes to the grader with both results, so the note can say what the query got wrong. The learner can run their query against the data before checking, and sees the `solution` after. Other languages (`python`, `javascript`, `typescript`) get the editor with highlighting but no runner: the grader reads the code against the `rubric`.
+
+````markdown
+```quiz
+id: q-02-05
+type: code
+objective: obj-02-2
+language: sql
+prompt: >-
+  The `orders` table holds one row per order. List each customer with their total spend, highest
+  first, leaving out customers who have spent less than 100.
+setup: |-
+  CREATE TABLE orders (id INTEGER PRIMARY KEY, customer TEXT, amount REAL);
+  INSERT INTO orders (customer, amount) VALUES
+    ('Ana', 60), ('Ana', 70), ('Ben', 40), ('Ben', 30), ('Cai', 250);
+starter: |-
+  SELECT customer
+  FROM orders
+solution: |-
+  SELECT customer, SUM(amount) AS total
+  FROM orders
+  GROUP BY customer
+  HAVING SUM(amount) >= 100
+  ORDER BY total DESC
+ordered: true
+rubric: >-
+  1. Groups by customer and sums the amount. 2. Filters the groups with HAVING, since WHERE runs
+  before the sum exists. 3. Sorts by the total, descending.
+  Wrong if: filters with WHERE amount >= 100, which drops single orders instead of small spenders.
+```
+````
+
+Code fields:
+
+- `language`: `sql` (SQLite, runs), `python`, `javascript`, `typescript`.
+- `setup` (`sql`): the schema and rows, as a `|-` literal block. Seed the rows so the wrong query the `Wrong if:` line names returns a different result from the right one: above, WHERE drops both of Ana's orders, so Ana, who spent 130, disappears. The learner sees it under a collapsed "The data" beside the editor, and can run queries against it; still name in the prompt the tables and columns the answer needs.
+- `solution` (`sql` required): one correct answer, as `|-`. It must return at least one row.
+- `check` (optional): a query run after the learner's code, for exercises that change data (`UPDATE`, `INSERT`, `CREATE`): its rows are compared instead of the code's own.
+- `ordered: true` only when the prompt asks for an order; otherwise row order is ignored. Column names and aliases are never compared, but column count and order are, so the prompt names the columns it wants in order.
+- `starter` (optional): code the editor opens with, as `|-`. It must not already pass.
+- `rubric`: as for `short`; the grader uses it to explain a mismatch and to grade languages that do not run.
+
+Code goes in `|-` literal blocks (`>-` would fold its lines), and never contains a triple backtick. Code questions get no review variants.
+
 Fields:
 
 - `id`: unique in the course; never changed or reused. Patterns, two digits zero-padded: baseline `q-base-01`; section `q-02-03` (module number, question number counted across the module); warm-up review `q-02-r1`; module test `q-02-t03`; drill-down `q-02-dd01`; flashcard made in a chat `q-02-fc01`; worksheet exercise `q-02-ws01` (numbered across all the module's worksheets).
 - `objective`: the outline objective the question tests, `obj-02-1` (module number, objective position). Required everywhere except the baseline, and the first module test's baseline re-ask when no objective of the module fits it.
-- `prompt`: self-contained; the reader may meet it weeks later as spaced review.
+- `prompt`: self-contained; Markdown, so name tables and columns in backticks; the reader may meet it weeks later as spaced review.
 - `rubric` (`short`): two to four numbered idea units, then a `Wrong if:` line naming the misconception. The learner may see it as the model answer; write it as one. No grader talk. Every unit answers something the prompt asks: the learner sees only the prompt, and the grader scores only what it asks for. To require a contrast ("why the others are not"), a mechanism, or an example, the prompt says so: "Which sentence is plot, why, and why are the others not?"
 - `options` (`mcq`): one line each, no `: ` inside. Every distractor is a misconception from the research files or a neighbouring idea from the module. `answer` is the 0-based index. `explanation`: why the answer is right and why the most tempting distractor tempts.
 
-YAML: write `prompt`, `rubric`, and `explanation` as `>-` block scalars, always. Never a double-quoted scalar with `\"` escapes inside a quiz block. After writing an `mcq`, confirm `options[answer]` is the correct option.
+YAML: write `prompt`, `rubric`, and `explanation` as `>-` block scalars, always; code fields as `|-`. Never a double-quoted scalar with `\"` escapes inside a quiz block. After writing an `mcq`, confirm `options[answer]` is the correct option.

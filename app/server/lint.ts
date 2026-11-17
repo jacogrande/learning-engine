@@ -7,6 +7,7 @@ import abcjs from "abcjs";
 import { COURSES_DIR, parseDoc } from "./content";
 import { abcSourceProblems, tidyAbc, tuneProblems, youtubeProblems } from "../shared/notation";
 import { imageRefs, mockProblems, parseChart } from "../shared/visuals";
+import { checkCode, runSql, runnable } from "./code";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -48,6 +49,8 @@ export async function lint(course: string, mod: string): Promise<string[]> {
         if (!q.explanation) problems.push(`${f}: ${id} has no explanation`);
       } else if (q?.type === "short") {
         if (!q.rubric) problems.push(`${f}: ${id} has no rubric`);
+      } else if (q?.type === "code") {
+        problems.push(...(await codeProblems(q)).map((p) => `${f}: ${id} ${p}`));
       } else problems.push(`${f}: ${id} has unknown type "${q?.type}"`);
     }
     problems.push(...notation(doc.body).map((p) => `${f}: ${p}`));
@@ -57,6 +60,22 @@ export async function lint(course: string, mod: string): Promise<string[]> {
     if (!sheet && f !== "quiz.md" && f !== "understanding.md" && words > 420) problems.push(`${f}: ${words} words of prose (ceiling 350)`);
   }
   return problems;
+}
+
+// A code exercise: a language, and a rubric for the grader. A SQL one runs: its setup and solution
+// must execute, the solution must return rows (an empty expected result passes any query that
+// returns nothing), and the starter code must not already pass.
+async function codeProblems(q: any): Promise<string[]> {
+  const out: string[] = [];
+  if (!q.language) out.push("has no language");
+  if (!q.rubric) out.push("has no rubric");
+  if (!runnable(q)) return out;
+  if (!q.solution) { out.push("has no solution (a SQL exercise is graded by comparing results with it)"); return out; }
+  const want = await runSql({ setup: q.setup, code: q.solution, check: q.check });
+  if (want.error) { out.push(`solution fails: ${want.error}`); return out; }
+  if (!want.total) out.push("solution returns no rows; give the setup data that makes the answer visible");
+  if (q.starter && (await checkCode(q, q.starter))?.match) out.push("starter code already passes");
+  return out;
 }
 
 // Charts that do not parse, mocks that reach for the network, images that are not on disk.

@@ -396,7 +396,8 @@ export async function requestVariant(course: string, qid: string, doc: string): 
   const r = db.query("SELECT log, variants FROM cards WHERE course=? AND question=?").get(course, qid) as any;
   if (!r || !wantsVariant(course, qid, JSON.parse(r.log).length, JSON.parse(r.variants ?? "[]").length)) return false;
   const spec = await question(course, doc, qid);
-  if (!spec) return false;
+  // A code exercise's solution and setup belong to its wording; a variant would need its own of both.
+  if (!spec || spec.type === "code") return false;
   onVariantWanted({ course, question: qid, doc, original: spec } as QueueItem);
   return true;
 }

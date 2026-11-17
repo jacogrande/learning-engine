@@ -10,6 +10,7 @@ import { state, migrate, rebuild } from "./server/state";
 import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSession, updateSession, sessionDetail, reviewHistory, amendLog, requestVariant, lastSession, setSuspended, setFlag, flagOf, suspendedCards, cardList, deleteCard, seed, clearSeeded, setVariantHook, addVariant, variantsOf, markVariantPending, markVariantFailed, cardStatus, settings, setSetting, optimize, reschedule, stats, type Mode, type Result } from "./server/review";
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
+import { checkCode, runSql, runnable } from "./server/code";
 import { ACTIONS_SYSTEM, VOCAB_ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -301,16 +302,26 @@ setVariantHook((it) => {
 
 // One grade job for a short answer. When review asked a variant, the grader is told so in the system
 // prompt, which outranks the skill's "find the block in the file" step.
-function gradeShort(slug: string, doc: string, qid: string, answer: string, variant: { prompt: string; rubric?: string } | null, then: (g: { result: Result; note: string }, jobId: string) => void) {
+// `evidence`: what running a code answer showed (its result against the solution's, or its error).
+function gradeShort(slug: string, doc: string, qid: string, answer: string, variant: { prompt: string; rubric?: string } | null, then: (g: { result: Result; note: string }, jobId: string) => void, evidence = "") {
   const flag = flagOf(slug, qid);
   const ref = { id: "" };
   const asked = variant ? `\n\nThe learner was asked this variant of the question, not the block in the file:\nPrompt: ${variant.prompt}\nRubric: ${variant.rubric ?? "(the original rubric's idea units, applied to this case)"}` : "";
   const system = variant ? "This grade is for a variant of the quiz question. Score the learner's answer against the variant's prompt and rubric given in the request, not against the block in the file; read the file only for context on the idea being tested." : undefined;
-  ref.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}${asked}\n\nLearner's answer:\n${quoteBlock(answer)}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
+  ref.id = enqueue(slug, "grade", `/grade ${slug} ${doc} ${qid}${asked}\n\nLearner's answer:\n${quoteBlock(answer)}${evidence ? `\n\n${evidence}` : ""}${flag ? `\n\nThe learner flagged an earlier grade on this question as wrong: "${flag}". Weigh that before scoring.` : ""}`, {
     ref: qid, schema: GRADE_SCHEMA, system, then: (g: any) => then(g, ref.id),
   }).id;
   return ref.id;
 }
+// A short or code answer. A SQL answer whose result matches the solution's is correct at once, with
+// no grader (`auto`); any other code answer goes to the grader with what running it showed.
+async function gradeOpen(slug: string, doc: string, qid: string, answer: string, variant: { prompt: string; rubric?: string } | null, then: (g: { result: Result; note: string }, jobId: string) => void) {
+  const spec = await question(slug, doc, qid);
+  const ran = spec?.type === "code" ? await checkCode(spec, answer) : null;
+  if (ran?.match) return { job: null, auto: { result: "correct" as Result, note: ran.note } };
+  return { job: gradeShort(slug, doc, qid, answer, variant, then, ran?.evidence), auto: null };
+}
+
 // Regrade every `partial` short answer (lesson answers and review answers) under the current /grade
 // skill. A lesson answer keeps its old grade in `history`; its card's first rating, which came from
 // that grade, is amended too. A review answer is amended in the card's log and the card replayed.
@@ -319,7 +330,7 @@ async function regradePartials(course?: string, only?: string) {
   const lessons = db.query(`SELECT course, question, doc, answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE result='partial'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
   for (const a of lessons) {
     if (a.doc.startsWith("quizzes/") || (only && a.question !== only)) continue;
-    gradeShort(a.course, a.doc, a.question, a.answer, null, (g) => {
+    const { auto } = await gradeOpen(a.course, a.doc, a.question, a.answer, null, (g) => {
       const cur = db.query("SELECT answer, history FROM answers WHERE course=? AND question=?").get(a.course, a.question) as any;
       if (cur?.answer !== a.answer) return;   // answered again since: that grade stands
       const history = [...JSON.parse(cur.history ?? "[]"), { answer: a.answer, result: a.result, note: a.note, confidence: a.confidence, gradedAt: a.gradedAt, regraded: true }].slice(-10);
@@ -328,18 +339,20 @@ async function regradePartials(course?: string, only?: string) {
       amendLog(a.course, a.question, (l, i) => i === 0 && l.answer === undefined && l.result === "partial", g);
       broadcast({ type: "answer", course: a.course, doc: a.doc, question: a.question }); broadcast({ type: "card", course: a.course });
     });
+    if (auto) continue;   // a code answer that now matches: left as it was graded
     queued.push(`${a.course}:${a.question} (lesson)`);
   }
   const cards = db.query(`SELECT course, question, doc, log FROM cards WHERE course<>'vocab'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
   for (const c of cards) for (const l of JSON.parse(only && c.question !== only ? "[]" : c.log)) {
     if (l.result !== "partial" || l.answer === undefined || typeof l.answer !== "string" || !l.review) continue;
     const spec = await question(c.course, c.doc, c.question);
-    if (spec?.type !== "short") continue;
+    if (spec?.type !== "short" && spec?.type !== "code") continue;
     const v = l.variant != null ? variantsOf(c.course, c.question)[l.variant] ?? null : null;
-    gradeShort(c.course, c.doc, c.question, l.answer, v, (g) => {
+    const { auto } = await gradeOpen(c.course, c.doc, c.question, l.answer, v, (g) => {
       amendLog(c.course, c.question, (x) => x.review === l.review, g);
       broadcast({ type: "card", course: c.course, question: c.question });
     });
+    if (auto) continue;
     queued.push(`${c.course}:${c.question} (review ${l.review})`);
   }
   return queued;
@@ -454,6 +467,17 @@ Bun.serve({
       POST: (req) => json(enqueue(req.params.slug, "module", `/generate-module ${req.params.slug} ${req.params.id}`, { ref: req.params.id, then: () => lintModule(req.params.slug, req.params.id) })),
     },
 
+    // Run a code exercise without grading it: the learner's SQL against the block's setup. The client
+    // sends the setup it rendered, so this works for lesson, test, worksheet and review alike.
+    "/api/run": {
+      POST: async (req) => {
+        const b = (await req.json()) as { language?: string; setup?: string; code?: string };
+        if (!runnable(b)) return json({ error: `No runner for ${b.language ?? "this language"}; check the answer to have it graded.` }, 400);
+        if (typeof b.code !== "string") return json({ error: "code required" }, 400);
+        return json(await runSql({ setup: b.setup, code: b.code }));
+      },
+    },
+
     // --- in-lesson answers ---------------------------------------------
     "/api/courses/:slug/answers": {
       GET: (req) => json((db.query(`SELECT a.question, a.answer, a.result, a.note, a.job, a.confidence, a.history, a.graded_at gradedAt, c.due, c.state
@@ -464,13 +488,14 @@ Bun.serve({
       // Earlier lesson answers are kept in `history`.
       POST: async (req) => {
         const slug = req.params.slug;
-        const { question: qid, doc, answer, type, result, confidence } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short"; result?: string; confidence?: number };
+        const { question: qid, doc, answer, type, confidence, ...b } = (await req.json()) as { question: string; doc: string; answer: string; type: "mcq" | "short" | "code"; result?: string; confidence?: number };
+        let result = type === "mcq" ? b.result : undefined, note: string | null = null;
         const firstRating = !cardReviewed(slug, qid);
         const prev = db.query("SELECT answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE course=? AND question=?").get(slug, qid) as any;
         const history = prev ? [...JSON.parse(prev.history ?? "[]"), { answer: prev.answer, result: prev.result, note: prev.note, confidence: prev.confidence, gradedAt: prev.gradedAt }].slice(-10) : [];
         let job: string | null = null;
-        if (type === "short") {
-          job = gradeShort(slug, doc, qid, answer, null, (g, jobId) => {
+        if (type !== "mcq") {
+          const g = await gradeOpen(slug, doc, qid, answer, null, (g, jobId) => {
             // Only if this is still the answer the job graded (the learner may have re-checked since).
             const r = db.run("UPDATE answers SET result=?, note=?, graded_at=? WHERE course=? AND question=? AND job=?", [g.result, g.note, now(), slug, qid, jobId]);
             if (!r.changes) return;
@@ -478,12 +503,15 @@ Bun.serve({
             if (firstRating) { rate(slug, qid, doc, g.result, confidence); requestVariant(slug, qid, doc); }
             broadcast({ type: "answer", course: slug, doc, question: qid });
           });
+          job = g.job;
+          if (g.auto) ({ result, note } = g.auto);   // a matching query: graded on the spot, like an mcq
         }
         db.run(`INSERT INTO answers (course, question, doc, answer, result, note, job, confidence, history, updated_at, graded_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)
                 ON CONFLICT(course, question) DO UPDATE SET doc=excluded.doc, answer=excluded.answer, result=excluded.result, note=NULL, job=excluded.job, confidence=excluded.confidence, history=excluded.history, updated_at=excluded.updated_at, graded_at=excluded.graded_at`,
-          [slug, qid, doc, answer, type === "mcq" ? result ?? null : null, null, job, confidence ?? null, JSON.stringify(history), now(), type === "mcq" ? now() : null]);
+          [slug, qid, doc, answer, result ?? null, null, job, confidence ?? null, JSON.stringify(history), now(), result ? now() : null]);
+        if (note) db.run("UPDATE answers SET note=? WHERE course=? AND question=?", [note, slug, qid]);   // the upsert clears it
         state.answer(slug, qid);
-        const review = type === "mcq" && result && firstRating ? rate(slug, qid, doc, result as any, confidence) : null;
+        const review = !job && result && firstRating ? rate(slug, qid, doc, result as any, confidence) : null;
         if (review) requestVariant(slug, qid, doc);
         if (review) broadcast({ type: "card", course: slug, question: qid });
         return json({ ok: true, job, review });
@@ -685,21 +713,25 @@ Bun.serve({
     // the lesson page keeps showing what the learner did there, graded against the wording they saw.
     "/api/review/answer": {
       POST: async (req) => {
-        const { course, question: qid, doc, answer, type, result, confidence, variant, session } = (await req.json()) as { course: string; question: string; doc: string; answer: string; type: "mcq" | "short"; result?: Result; confidence?: number; variant?: number | null; session?: string };
+        const { course, question: qid, doc, answer, type, result, confidence, variant, session } = (await req.json()) as { course: string; question: string; doc: string; answer: string; type: "mcq" | "short" | "code"; result?: Result; confidence?: number; variant?: number | null; session?: string };
         // The session goes into the log entry, so a grade that lands after the learner left still counts in it.
         const log = typeof session === "string" ? { session } : undefined;
         if (!course || !qid || !doc || typeof answer !== "string") return json({ error: "course, question, doc, answer required" }, 400);
         const vi = variant ?? null, v = vi != null ? variantsOf(course, qid)[vi] ?? null : null;
         const key = `${course}:${qid}`;
-        if (type === "short") {
-          const job = gradeShort(course, doc, qid, answer, v, (g, jobId) => {
+        if (type !== "mcq") {
+          const { job, auto } = await gradeOpen(course, doc, qid, answer, v, (g, jobId) => {
             if (pendingReviewGrades.get(key) !== jobId) return;   // a later answer superseded this one
             pendingReviewGrades.delete(key);
             rate(course, qid, doc, g.result, confidence, vi, { answer, note: g.note, log });
             broadcast({ type: "card", course, question: qid });
           });
-          pendingReviewGrades.set(key, job);
-          return json({ ok: true, job, review: null });
+          if (job) { pendingReviewGrades.set(key, job); return json({ ok: true, job, review: null }); }
+          // A matching query: rated now, like an mcq; the result and note go back with the review.
+          pendingReviewGrades.delete(key);
+          const review = rate(course, qid, doc, auto!.result, confidence, vi, { answer, note: auto!.note, log });
+          broadcast({ type: "card", course, question: qid });
+          return json({ ok: true, job: null, review, ...auto });
         }
         if (!result) return json({ error: "result required for mcq" }, 400);
         pendingReviewGrades.delete(key);

@@ -22,7 +22,7 @@ The size the request gives, exactly; without one, ten to fourteen. Every exercis
 
 1. **Retrieve and recognise.** Short items on the section's core claim and terms, asked in new cases. `mcq` only where the distractors are the misconceptions from the research or `learner.md` `errors`.
 2. **Tell apart.** Pairs or cases that differ by one feature, where the learner must say which is which and why.
-3. **Produce.** Rewrite, fix or write something: the kind of output the objective names. At least a third of the worksheet is here.
+3. **Produce.** Rewrite, fix or write something: the kind of output the objective names. At least a third of the worksheet is here. When the output is code, these are `type: code` blocks; a "fix it" item puts the broken code in `starter`.
 4. **Transfer.** Cases from the learner's `domains` that neither the section nor earlier worksheets used.
 
 In a sheet of ten or more, mix in two or three exercises on earlier sections of this module where the idea connects, marked by their own `objective:`; never more than a fifth of the sheet. A shorter sheet stays on this section. Within a group, vary the case and the surface so no two items can be answered by the same memorised line.

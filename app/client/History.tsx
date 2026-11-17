@@ -8,7 +8,7 @@ import { Link, Shell } from "./App";
 type Tally = Partial<Record<Result, number>>;
 type SessionRow = { id: string; kind: string; scope: string | null; startedAt: string; endedAt: string | null; reviewed: number; day: string; tally: Tally; graded: number; pending: number };
 type HistoryData = { streak: number; today: string; days: Record<string, { reviewed: number; correct: number }>; sessions: SessionRow[] };
-type Item = { course: string; question: string; courseTitle: string; where: string; to: string; prompt: string; type: "mcq" | "short"; answer: string; correct: string | null; result: Result | null; note: string | null; confidence: number | null; at: string; variant: number | null };
+type Item = { course: string; question: string; courseTitle: string; where: string; to: string; prompt: string; type: "mcq" | "short" | "code"; answer: string; correct: string | null; result: Result | null; note: string | null; confidence: number | null; at: string; variant: number | null };
 type Detail = SessionRow & { items: Item[] };
 
 const KIND: Record<string, string> = { daily: "Daily review", course: "Course", module: "Module", weak: "Weak spots", burst: "Burst", cram: "Cram" };
@@ -107,7 +107,8 @@ export function SessionPage({ id }: { id: string }) {
             <span className="quiz-status">{it.result ?? "grading"}</span>
           </p>
           <div className="quiz-prompt quiz-prompt-block"><Markdown body={it.prompt} /></div>
-          <blockquote className="quiz-answer">{it.answer || <span className="muted">No answer</span>}</blockquote>
+          {it.type === "code" && it.answer ? <pre className="quiz-code"><code>{it.answer}</code></pre>
+            : <blockquote className="quiz-answer">{it.answer || <span className="muted">No answer</span>}</blockquote>}
           {it.confidence ? <p className="quiz-remark muted">{CONFIDENCE[it.confidence - 1]}</p> : null}
           {it.correct && it.result !== "correct" && <p className="quiz-explain">Answer: {it.correct}</p>}
           {it.note && <div className="quiz-explain"><Markdown body={it.note} /></div>}

@@ -3,7 +3,7 @@
 // is done the page shows the day's result and the history until tomorrow. From the second review
 // on, a card may be asked as a variant.
 import { useCallback, useEffect, useRef, useState } from "react";
-import { get, post, put, useLive, type Answer, type Course } from "./api";
+import { get, post, put, useLive, type Answer, type Course, type Result } from "./api";
 import { Quiz, QuizGrade, type QuizSpec } from "./Quiz";
 import { Link, Shell, navigate } from "./App";
 import { Markdown } from "./Markdown";
@@ -85,10 +85,11 @@ export function ReviewPage({ slug, mode: modeProp, scope: scopeProp }: { slug?: 
     setSaved((s) => ({ ...s, [key(it)]: pending }));
     syncSession();   // count the answer now: the learner may leave before the grade lands
     if (it.course === VOCAB) return void ensureSession().then((s) => submitVocab(it, answer, confidence, pending, s.id));
-    const sent = ensureSession().then((s) => post<{ review: { due: string; leech?: boolean } | null }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant, session: s.id }));
+    const sent = ensureSession().then((s) => post<{ review: { due: string; leech?: boolean } | null; result?: Result; note?: string }>("/api/review/answer", { course: it.course, question: it.question, doc: it.doc, answer, type: spec.type, result, confidence, variant: it.variant, session: s.id }));
     sending.current[key(it)] = sent;
     sent.then((r) => {
-      if (r.review) return record(it, { ...pending, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });   // MCQ: rated at once
+      // MCQ, and a SQL answer whose result matched: rated at once.
+      if (r.review) return record(it, { ...pending, result: r.result ?? pending.result, note: r.note ?? pending.note, gradedAt: new Date().toISOString(), due: r.review.due, leech: !!r.review.leech });
       // Short answers grade in a job; poll the card until a new log entry lands, bounded. On timeout the
       // card stays "grading" in the tally rather than being counted as answered with no result.
       let tries = 0;

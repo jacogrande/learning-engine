@@ -25,6 +25,6 @@ Then 6–10 `quiz` blocks, no prose between them except a score a question refer
 - **One discrimination question per confusable pair** the module introduced; distractors from the research files' misconceptions and from `learner.md` `errors`.
 - **Two to four earlier-module questions**, interleaved, tagged with that module's objective id. Prefer `carry` items and objectives marked `partial` or `unmet`. Never tag a question with an objective from a module that has not been taught yet. For the first module there are no earlier modules: skip this rule, and instead (when `quizzes/baseline-assessment.md` exists; a brief has none) re-ask one baseline question the learner got wrong, in a new case, tagged with this module's objective if it fits one, otherwise with no `objective` field.
 - Cases come from the learner's `domains`, rotating. No case from any section.
-- Default `short`. `mcq` only where plausible confusions are worth telling apart.
+- Default `short`. `mcq` only where plausible confusions are worth telling apart. `code` when the answer is code: a transfer question in a SQL course is a query against data no section used.
 
 Reply with one line naming the file.
