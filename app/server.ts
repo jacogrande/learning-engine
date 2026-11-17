@@ -11,6 +11,9 @@ import { RESULT, GRADE_SCHEMA, rate, question, mastery, queue, summary, startSes
 import * as sync from "./server/sync";
 import * as vocab from "./server/vocab";
 import { checkCode, runSql, runnable } from "./server/code";
+
+// A request from a page this app did not serve: a browser sends Origin on cross-site POSTs.
+const foreign = (req: Request) => { const o = req.headers.get("origin"); return !!o && o !== new URL(req.url).origin; };
 import { ACTIONS_SYSTEM, VOCAB_ACTIONS_SYSTEM, parseActions, runActions, undo as undoAction, type Outcome } from "./server/actions";
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
@@ -330,7 +333,7 @@ async function regradePartials(course?: string, only?: string) {
   const lessons = db.query(`SELECT course, question, doc, answer, result, note, confidence, history, graded_at gradedAt FROM answers WHERE result='partial'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
   for (const a of lessons) {
     if (a.doc.startsWith("quizzes/") || (only && a.question !== only)) continue;
-    const { auto } = await gradeOpen(a.course, a.doc, a.question, a.answer, null, (g) => {
+    const apply = (g: { result: Result; note: string }) => {
       const cur = db.query("SELECT answer, history FROM answers WHERE course=? AND question=?").get(a.course, a.question) as any;
       if (cur?.answer !== a.answer) return;   // answered again since: that grade stands
       const history = [...JSON.parse(cur.history ?? "[]"), { answer: a.answer, result: a.result, note: a.note, confidence: a.confidence, gradedAt: a.gradedAt, regraded: true }].slice(-10);
@@ -338,8 +341,9 @@ async function regradePartials(course?: string, only?: string) {
       state.answer(a.course, a.question);
       amendLog(a.course, a.question, (l, i) => i === 0 && l.answer === undefined && l.result === "partial", g);
       broadcast({ type: "answer", course: a.course, doc: a.doc, question: a.question }); broadcast({ type: "card", course: a.course });
-    });
-    if (auto) continue;   // a code answer that now matches: left as it was graded
+    };
+    const { auto } = await gradeOpen(a.course, a.doc, a.question, a.answer, null, apply);
+    if (auto) { apply(auto); continue; }   // a code answer that now matches: graded on the spot
     queued.push(`${a.course}:${a.question} (lesson)`);
   }
   const cards = db.query(`SELECT course, question, doc, log FROM cards WHERE course<>'vocab'${course ? " AND course=?" : ""}`).all(...(course ? [course] : [])) as any[];
@@ -348,11 +352,12 @@ async function regradePartials(course?: string, only?: string) {
     const spec = await question(c.course, c.doc, c.question);
     if (spec?.type !== "short" && spec?.type !== "code") continue;
     const v = l.variant != null ? variantsOf(c.course, c.question)[l.variant] ?? null : null;
-    const { auto } = await gradeOpen(c.course, c.doc, c.question, l.answer, v, (g) => {
+    const apply = (g: { result: Result; note: string }) => {
       amendLog(c.course, c.question, (x) => x.review === l.review, g);
       broadcast({ type: "card", course: c.course, question: c.question });
-    });
-    if (auto) continue;
+    };
+    const { auto } = await gradeOpen(c.course, c.doc, c.question, l.answer, v, apply);
+    if (auto) { apply(auto); continue; }
     queued.push(`${c.course}:${c.question} (review ${l.review})`);
   }
   return queued;
@@ -471,10 +476,12 @@ Bun.serve({
     // sends the setup it rendered, so this works for lesson, test, worksheet and review alike.
     "/api/run": {
       POST: async (req) => {
-        const b = (await req.json()) as { language?: string; setup?: string; code?: string };
+        if (foreign(req)) return json({ error: "forbidden" }, 403);
+        const b = (await req.json()) as { language?: string; setup?: string; code?: string; check?: string };
         if (!runnable(b)) return json({ error: `No runner for ${b.language ?? "this language"}; check the answer to have it graded.` }, 400);
         if (typeof b.code !== "string") return json({ error: "code required" }, 400);
-        return json(await runSql({ setup: b.setup, code: b.code }));
+        // With a `check`, the run shows what the check query sees after the code: an UPDATE's effect.
+        return json(await runSql({ setup: b.setup, code: b.code, check: b.check }));
       },
     },
 

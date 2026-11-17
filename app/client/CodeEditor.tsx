@@ -1,7 +1,7 @@
 // A small code editor for `type: code` questions: CodeMirror with the language's highlighting,
 // coloured from the page theme (styles.css, `.tok-*`), Tab to indent and Mod-Enter to run.
 import { useEffect, useRef } from "react";
-import { EditorState, Compartment, type Extension } from "@codemirror/state";
+import { Annotation, EditorState, Compartment, type Extension } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, placeholder, highlightActiveLine } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
 import { bracketMatching, indentOnInput, syntaxHighlighting } from "@codemirror/language";
@@ -20,6 +20,9 @@ const LANGS: Record<string, () => Extension> = {
   typescript: () => javascript({ typescript: true }), ts: () => javascript({ typescript: true }),
 };
 const lang = (name?: string) => LANGS[(name ?? "").toLowerCase()]?.() ?? [];
+// Marks a change that came in through `value` (a saved answer arriving), so it is not reported back
+// through onChange as if the learner typed it: that would mark a checked answer as edited.
+const external = Annotation.define<boolean>();
 
 export function CodeEditor({ value, onChange, language, onRun, readOnly, label }: {
   value: string; onChange?: (v: string) => void; language?: string; onRun?: () => void; readOnly?: boolean; label?: string;
@@ -42,7 +45,9 @@ export function CodeEditor({ value, onChange, language, onRun, readOnly, label }
           placeholder(language ? `Your ${language.toUpperCase() === "SQL" ? "SQL" : language}` : "Your code"),
           keymap.of([{ key: "Mod-Enter", run: () => { cb.current.onRun?.(); return !!cb.current.onRun; } }, indentWithTab, ...defaultKeymap, ...historyKeymap]),
           ro.current.of([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]),
-          EditorView.updateListener.of((u) => { if (u.docChanged) cb.current.onChange?.(u.state.doc.toString()); }),
+          EditorView.updateListener.of((u) => {
+            if (u.docChanged && !u.transactions.some((t) => t.annotation(external))) cb.current.onChange?.(u.state.doc.toString());
+          }),
           EditorView.contentAttributes.of({ "aria-label": label ?? "Code answer", spellcheck: "false", autocapitalize: "off", autocorrect: "off" }),
         ],
       }),
@@ -54,7 +59,7 @@ export function CodeEditor({ value, onChange, language, onRun, readOnly, label }
   // A value set from outside (a saved answer arriving, a reset): replace the text, keep the history.
   useEffect(() => {
     const v = view.current;
-    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value }, annotations: external.of(true) });
   }, [value]);
   useEffect(() => {
     view.current?.dispatch({ effects: ro.current.reconfigure([EditorState.readOnly.of(!!readOnly), EditorView.editable.of(!readOnly)]) });

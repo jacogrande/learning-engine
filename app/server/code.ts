@@ -6,38 +6,68 @@
 
 export type CodeSpec = { language?: string; setup?: string; solution?: string; check?: string; ordered?: boolean };
 export type SqlJob = { setup?: string; code: string; check?: string };
-export type SqlOutput = { columns?: string[]; rows?: unknown[][]; total?: number; error?: string };
+// `rows` holds the first 500 for display; `ordered` and `unordered` digest every row, so results
+// longer than that still compare in full.
+export type SqlOutput = { columns?: string[]; rows?: unknown[][]; total?: number; ordered?: string; unordered?: string; error?: string };
 export type CodeCheck = { match: boolean; note: string; evidence: string };
 
-const TIMEOUT_MS = 3000;
-export const runnable = (s: CodeSpec | null | undefined) => (s?.language ?? "").toLowerCase() === "sql";
+const TIMEOUT_MS = 3000, PARALLEL = 4;
+export const RUNNABLE = ["sql", "sqlite"];
+export const LANGUAGES = [...RUNNABLE, "python", "javascript", "typescript"];
+export const runnable = (s: CodeSpec | null | undefined) => RUNNABLE.includes((s?.language ?? "").toLowerCase());
 
 // Statements one at a time: semicolons inside strings, quoted names and comments do not split, and
-// a CREATE TRIGGER runs to its END.
-export function splitSql(src: string): string[] {
-  const out: string[] = [];
-  let cur = "", bare = "";   // `bare`: the statement with strings and comments blanked, for the trigger test
+// a CREATE TRIGGER runs to the END that closes its BEGIN (a CASE … END inside it does not).
+export const splitSql = (src: string) => scan(src).map((st) => st.text);
+// The source with strings, quoted names and comments blanked: what the keyword checks read.
+export const bareSql = (src: string) => scan(src).map((st) => st.bare).join(" ; ");
+
+function scan(src: string) {
+  const out: { text: string; bare: string }[] = [];
+  let cur = "", bare = "";
   for (let i = 0; i < src.length; i++) {
     const c = src[i], two = src.slice(i, i + 2);
-    if (two === "--") { const j = src.indexOf("\n", i); i = j < 0 ? src.length : j - 1; cur += " "; continue; }
-    if (two === "/*") { const j = src.indexOf("*/", i + 2); i = j < 0 ? src.length : j + 1; cur += " "; continue; }
+    if (two === "--") { const j = src.indexOf("\n", i); i = j < 0 ? src.length : j - 1; cur += " "; bare += " "; continue; }
+    if (two === "/*") { const j = src.indexOf("*/", i + 2); i = j < 0 ? src.length : j + 1; cur += " "; bare += " "; continue; }
     const close = c === "'" ? "'" : c === '"' ? '"' : c === "`" ? "`" : c === "[" ? "]" : null;
     if (close) { const j = src.indexOf(close, i + 1); const end = j < 0 ? src.length : j; cur += src.slice(i, end + 1); bare += " _ "; i = end; continue; }
-    if (c === ";" && !(/^\s*create\s+(temp\s+|temporary\s+)?trigger\b/i.test(bare) && !/\bend\s*$/i.test(bare))) {
-      if (cur.trim()) out.push(cur.trim());
+    if (c === ";" && !openTrigger(bare)) {
+      if (cur.trim()) out.push({ text: cur.trim(), bare });
       cur = bare = ""; continue;
     }
     cur += c; bare += c;
   }
-  if (cur.trim()) out.push(cur.trim());
+  if (cur.trim()) out.push({ text: cur.trim(), bare });
   return out;
+}
+// A trigger whose BEGIN (and any CASE) has not been closed by as many ENDs. `NEW.end` is a column.
+function openTrigger(bare: string) {
+  if (!/^\s*create\s+(temp\s+|temporary\s+)?trigger\b/i.test(bare)) return false;
+  const words = (re: RegExp) => bare.match(re)?.length ?? 0;
+  const opens = words(/(?<![.\w])(begin|case)\b/gi);
+  return opens > 0 && words(/(?<![.\w])end\b/gi) < opens;
 }
 
 // Nothing that reaches past the in-memory database: no attached files, no VACUUM INTO, no extensions.
-const FORBIDDEN = /\b(attach|detach|load_extension)\b|\bvacuum\b[\s\S]*\binto\b/i;
+// Read from the bare text, so a string or a comment that mentions them does not trip it. Setup and
+// check are tested too: /api/run takes them from the request.
+const FORBIDDEN = /\b(attach|detach|load_extension)\b|\bvacuum\b[^;]*\binto\b/i;
+export const forbidden = (job: SqlJob) => [job.code, job.setup, job.check].some((s) => s && FORBIDDEN.test(bareSql(s)));
+
+// At most PARALLEL runners at once; the rest wait their turn.
+let running = 0;
+const waiting: (() => void)[] = [];
+async function slot<T>(fn: () => Promise<T>): Promise<T> {
+  if (running >= PARALLEL) await new Promise<void>((r) => waiting.push(r));
+  running++;
+  try { return await fn(); } finally { running--; waiting.shift()?.(); }
+}
 
 export function runSql(job: SqlJob): Promise<SqlOutput> {
-  if (FORBIDDEN.test(job.code)) return Promise.resolve({ error: "ATTACH, VACUUM INTO and extensions are off in exercises: they reach outside the scratch database." });
+  if (forbidden(job)) return Promise.resolve({ error: "ATTACH, VACUUM INTO and extensions are off in exercises: they reach outside the scratch database." });
+  return slot(() => spawnRunner(job));
+}
+function spawnRunner(job: SqlJob): Promise<SqlOutput> {
   const p = Bun.spawn([process.execPath, RUNNER], { stdin: new Blob([JSON.stringify(job)]), stdout: "pipe", stderr: "pipe" });
   let timedOut = false;
   const t = setTimeout(() => { timedOut = true; p.kill(9); }, TIMEOUT_MS);
@@ -49,9 +79,10 @@ export function runSql(job: SqlJob): Promise<SqlOutput> {
 }
 const RUNNER = new URL("./sql-runner.ts", import.meta.url).pathname;
 
-// Floats compared to 12 significant digits, so 0.1+0.2 matches 0.3.
+// One row as a comparable string. Floats to 12 significant digits, so 0.1+0.2 matches 0.3.
 const norm = (v: unknown) => (typeof v === "number" && !Number.isInteger(v) ? Number(v.toPrecision(12)) : v);
-const key = (r: unknown[]) => JSON.stringify(r.map(norm));
+export const rowKey = (r: unknown[]) => JSON.stringify(r.map(norm));
+const key = rowKey;
 
 // Run the learner's code and the solution; compare. Null when the spec has nothing to run.
 export async function checkCode(spec: CodeSpec, answer: string): Promise<CodeCheck | null> {
@@ -67,7 +98,8 @@ export async function checkCode(spec: CodeSpec, answer: string): Promise<CodeChe
   const g = got.rows ?? [], w = want.rows ?? [];
   const sameCols = (got.columns?.length ?? 0) === (want.columns?.length ?? 0);
   const gk = g.map(key), wk = w.map(key);
-  const ordered = spec.ordered ? gk.join("\n") === wk.join("\n") : [...gk].sort().join("\n") === [...wk].sort().join("\n");
+  // Every row, through the digests; the shown rows below only describe a difference.
+  const ordered = spec.ordered ? got.ordered === want.ordered : got.unordered === want.unordered;
   const sameTotal = (got.total ?? g.length) === (want.total ?? w.length);
   if (sameCols && sameTotal && ordered) {
     return { match: true, evidence: "", note: `Your query returns the expected result: ${count(want)}${spec.ordered ? ", in the expected order" : ""}.` };
@@ -78,7 +110,8 @@ export async function checkCode(spec: CodeSpec, answer: string): Promise<CodeChe
     const missing = multisetMinus(wk, gk), extra = multisetMinus(gk, wk);
     if (missing.length) diffs.push(`Rows expected but missing (${missing.length}): ${missing.slice(0, 5).join("; ")}${missing.length > 5 ? "; …" : ""}`);
     if (extra.length) diffs.push(`Rows returned but not expected (${extra.length}): ${extra.slice(0, 5).join("; ")}${extra.length > 5 ? "; …" : ""}`);
-    if (!missing.length && !extra.length) diffs.push("Same rows, different order; the prompt asks for a specific order.");
+    const cut = Math.max(got.total ?? 0, want.total ?? 0) > Math.min(g.length, w.length);
+    if (!missing.length && !extra.length) diffs.push(cut ? "The first rows agree; a difference lies past the rows shown here." : "Same rows, different order; the prompt asks for a specific order.");
   }
   return { match: false, note: "", evidence: `${head}\n\nThey differ.\n${diffs.map((d) => `- ${d}`).join("\n")}\n\nLearner's result:\n${table(got)}\n\nExpected result:\n${table(want)}\n\nColumn names and aliases are not compared. The result decides correctness: a query whose result differs is not correct, however close the code looks; it may be partial when it gets part of the task right.` };
 }

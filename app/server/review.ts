@@ -233,8 +233,9 @@ export const flagOf = (course: string, question: string) => (db.query("SELECT fl
 
 // --- variants -----------------------------------------------------------------
 export const variantsOf = (course: string, question: string): Variant[] => JSON.parse((db.query("SELECT variants FROM cards WHERE course=? AND question=?").get(course, question) as any)?.variants ?? "[]");
-export function addVariant(course: string, question: string, type: "mcq" | "short", v: Partial<Variant>): string | null {
-  // Lint like any quiz block before storing.
+export function addVariant(course: string, question: string, type: string, v: Partial<Variant>): string | null {
+  // Lint like any quiz block before storing. Only mcq and short: a code variant would need its own setup and solution.
+  if (type !== "mcq" && type !== "short") return `no variants for ${type} questions`;
   if (!v.prompt || typeof v.prompt !== "string") return "no prompt";
   if (type === "short" && !v.rubric) return "no rubric";
   if (type === "mcq") {
@@ -305,7 +306,7 @@ async function resolve(rows: Row[], prefer = false): Promise<QueueItem[]> {
     const file = r.doc.split("/").slice(2).join("/");
     const log = JSON.parse(r.log), last = log.at(-1);
     const variants: Variant[] = JSON.parse(r.variants ?? "[]");
-    const vi = pickVariant(log.length, r.last_variant ?? -1, variants, prefer);
+    const vi = spec.type === "code" ? null : pickVariant(log.length, r.last_variant ?? -1, variants, prefer);
     const asked = vi === null ? spec : { ...spec, prompt: variants[vi].prompt, rubric: variants[vi].rubric ?? spec.rubric, options: variants[vi].options ?? spec.options, answer: variants[vi].answer ?? spec.answer, explanation: variants[vi].explanation ?? spec.explanation };
     items.push({
       course: r.course, courseTitle: c?.title ?? r.course, question: r.question, doc: r.doc, module: r.module,
@@ -377,7 +378,7 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   const next = (db.query(`SELECT min(due) d FROM cards WHERE ${base}${scopeWhere} AND due>?`).get(...args, now()) as any).d;
   // Ask for variants in the background for cards that will be seen again, a few per load.
   let asked = 0;
-  for (const it of items) if (it.course !== VOCAB && asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
+  for (const it of items) if (it.course !== VOCAB && it.original?.type !== "code" && asked < VARIANTS_PER_LOAD && wantsVariant(it.course, it.question, it.reviews, it.variantCount)) { asked++; onVariantWanted?.(it); }
   // And for cards coming due in the next two days that have none yet, so the variant is ready when they are.
   if (asked < VARIANTS_PER_LOAD) {
     const soon = db.query(`SELECT course, question, doc FROM cards WHERE suspended=0 AND state<>'orphaned' AND course<>'${VOCAB}' AND log<>'[]' AND variants='[]' AND due<=? ORDER BY due LIMIT 20`).all(new Date(Date.now() + 2 * 864e5).toISOString()) as any[];

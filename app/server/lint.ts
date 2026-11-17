@@ -7,7 +7,7 @@ import abcjs from "abcjs";
 import { COURSES_DIR, parseDoc } from "./content";
 import { abcSourceProblems, tidyAbc, tuneProblems, youtubeProblems } from "../shared/notation";
 import { imageRefs, mockProblems, parseChart } from "../shared/visuals";
-import { checkCode, runSql, runnable } from "./code";
+import { LANGUAGES, checkCode, runSql, runnable } from "./code";
 import { existsSync } from "node:fs";
 import { dirname } from "node:path";
 
@@ -68,6 +68,7 @@ export async function lint(course: string, mod: string): Promise<string[]> {
 async function codeProblems(q: any): Promise<string[]> {
   const out: string[] = [];
   if (!q.language) out.push("has no language");
+  else if (!LANGUAGES.includes(String(q.language).toLowerCase())) out.push(`has language "${q.language}"; use one of ${LANGUAGES.join(", ")}`);
   if (!q.rubric) out.push("has no rubric");
   if (!runnable(q)) return out;
   if (!q.solution) { out.push("has no solution (a SQL exercise is graded by comparing results with it)"); return out; }

@@ -182,7 +182,7 @@ rubric: >-
 
 Code fields:
 
-- `language`: `sql` (SQLite, runs), `python`, `javascript`, `typescript`.
+- `language`: `sql` (SQLite, runs; `sqlite` is the same), `python`, `javascript`, `typescript`. Lint rejects any other.
 - `setup` (`sql`): the schema and rows, as a `|-` literal block. Seed the rows so the wrong query the `Wrong if:` line names returns a different result from the right one: above, WHERE drops both of Ana's orders, so Ana, who spent 130, disappears. The learner sees it under a collapsed "The data" beside the editor, and can run queries against it; still name in the prompt the tables and columns the answer needs.
 - `solution` (`sql` required): one correct answer, as `|-`. It must return at least one row.
 - `check` (optional): a query run after the learner's code, for exercises that change data (`UPDATE`, `INSERT`, `CREATE`): its rows are compared instead of the code's own.

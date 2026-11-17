@@ -13,7 +13,7 @@ export type QuizSpec = {
   options?: string[]; answer?: number; explanation?: string; rubric?: string;
   language?: string; setup?: string; starter?: string; solution?: string; check?: string; ordered?: boolean;
 };
-const runnable = (spec: QuizSpec) => spec.type === "code" && (spec.language ?? "").toLowerCase() === "sql";
+const runnable = (spec: QuizSpec) => spec.type === "code" && ["sql", "sqlite"].includes((spec.language ?? "").toLowerCase());
 type RunOutput = { columns?: string[]; rows?: unknown[][]; total?: number; error?: string };
 
 // Defined once: a new `p` component on every render would remount the text, and a reader's
@@ -99,7 +99,7 @@ function Live({ spec }: { spec: QuizSpec }) {
   const run = () => {
     if (!runnable(spec) || running || !v.trim()) return;
     setRunning(true);
-    fetch("/api/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ language: spec.language, setup: spec.setup, code: v }) })
+    fetch("/api/run", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ language: spec.language, setup: spec.setup, code: v, check: spec.check }) })
       .then((r) => r.json() as Promise<RunOutput>, () => ({ error: "The app could not be reached." }))
       .then(setOutput).finally(() => setRunning(false));
   };
