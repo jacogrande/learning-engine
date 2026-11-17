@@ -30,7 +30,7 @@ Everything that costs anything — generating modules, grading, chat — runs th
 
 ## Status
 
-Built and verified 2026-10-29 — see [phase-4-results.md](phase-4-results.md). The repo is `github.com/jacogrande/learning` (private). An earlier version split the library into its own repo; it was folded back in because one clone per machine is simpler and the only benefit of the split (isolating data commits) is had by path-limiting the sync.
+Built and verified 2026-10-29 — see [phase-4-results.md](phase-4-results.md). Since 2026-11-17 the engine (`github.com/jacogrande/learning-engine`, public) and each learner's library (their own repo, private) are separate again, so the engine can be shared without anyone's data. The library is cloned at `library/` inside the engine and ignored by it; `/start-learning` sets this up on each machine. Sync runs in the library repo, so it no longer needs path-limiting, though it still stages only the library path.
 
 ## Rejected
 

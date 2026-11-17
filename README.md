@@ -9,7 +9,7 @@ This repo is the **engine**: the app, and the skills and rules Claude Code write
 You need [Bun](https://bun.sh), git and [Claude Code](https://claude.com/claude-code). For a library synced through GitHub, also the GitHub CLI, logged in (`gh auth login`).
 
 ```
-git clone git@github.com:jacogrande/learning.git && cd learning
+git clone https://github.com/jacogrande/learning-engine.git && cd learning-engine
 claude
 > /start-learning
 ```
