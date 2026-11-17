@@ -1,5 +1,5 @@
 // Reads courses from content/courses/<slug>/. Files are the source of truth; nothing is cached.
-import { readdir, readFile, stat } from "node:fs/promises";
+import { readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve, basename } from "node:path";
 import YAML from "yaml";
 
@@ -57,8 +57,12 @@ export type Module = {
   test: boolean;            // modules/<id>/quiz.md exists
   understanding: null | { level?: string; summary?: string; calibration?: string; carry?: string[] };
 };
+// `format: brief` is a one-module course with no baseline, for getting up to speed on a topic fast.
+// `folder` groups courses on the home page. `review: false` keeps a course's cards out of the daily
+// review and the all-course modes; its own review page still serves them.
 export type Course = {
   slug: string; title: string; depth?: string; description: string;
+  format: "course" | "brief"; folder: string | null; review: boolean;
   stage: "baseline" | "assessed" | "ready";
   modules: Module[];
 };
@@ -111,7 +115,45 @@ export async function getCourse(slug: string): Promise<Course | null> {
     });
   }
 
-  return { slug, title: course.frontmatter.title ?? slug, depth: course.frontmatter.depth, description: course.body.trim(), stage, modules };
+  const fm = course.frontmatter;
+  return {
+    slug, title: fm.title ?? slug, depth: fm.depth, description: course.body.trim(),
+    format: fm.format === "brief" ? "brief" : "course", folder: typeof fm.folder === "string" && fm.folder.trim() ? fm.folder.trim() : null,
+    review: fm.review !== false && fm.review !== "false", stage, modules,
+  };
+}
+
+// Slugs of the courses whose course.md sets `review: false`. Reads only course.md (mtime-cached).
+export async function outOfReview(): Promise<string[]> {
+  if (!(await exists(COURSES_DIR))) return [];
+  const slugs = (await readdir(COURSES_DIR, { withFileTypes: true })).filter((d) => d.isDirectory()).map((d) => d.name);
+  const out: string[] = [];
+  for (const slug of slugs) { const r = (await readDoc(join(COURSES_DIR, slug, "course.md")))?.frontmatter.review; if (r === false || r === "false") out.push(slug); }
+  return out;
+}
+
+// A free slug for a new course: kebab-case of the subject, numbered if taken.
+export async function freeSlug(subject: string): Promise<string> {
+  const base = subject.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").split("-").slice(0, 6).join("-") || "brief";
+  for (let n = 1; ; n++) { const s = n === 1 ? base : `${base}-${n}`; if (!(await exists(join(COURSES_DIR, s)))) return s; }
+}
+
+// Sets `folder` and `review` in course.md, keeping every other line of the file as written.
+export async function setCourseMeta(slug: string, meta: { folder?: string | null; review?: boolean }): Promise<boolean> {
+  const p = join(COURSES_DIR, slug, "course.md");
+  const src = await readFile(p, "utf8").catch(() => null);
+  const m = src && /^---\n([\s\S]*?)\n---\n?/.exec(src);
+  if (!src || !m) return false;
+  let lines = m[1].split("\n");
+  const put = (key: string, line: string | null) => {
+    const i = lines.findIndex((l) => l.startsWith(`${key}:`));
+    if (line === null) { if (i >= 0) lines.splice(i, 1); }
+    else if (i >= 0) lines[i] = line; else lines.push(line);
+  };
+  if (meta.folder !== undefined) put("folder", meta.folder?.trim() ? `folder: ${JSON.stringify(meta.folder.trim())}` : null);
+  if (meta.review !== undefined) put("review", meta.review ? null : "review: false");
+  await writeFile(p, `---\n${lines.join("\n")}\n---\n${src.slice(m[0].length)}`);
+  return true;
 }
 
 // Any markdown doc inside the course, by course-relative path. Guards against traversal.

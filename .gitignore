@@ -5,4 +5,6 @@ spike/out/
 *.tmp.*
 .DS_Store
 # Sources a generation job downloads to read (transcription PDFs, page renders): working files, not course content, and not ours to redistribute.
+.env*
+
 library/content/courses/*/modules/*/research/sources/

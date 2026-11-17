@@ -8,7 +8,7 @@ disable-model-invocation: true
 
 Arguments: $ARGUMENTS — course slug, then the section file (course-relative). The learner's selected passage and first message follow.
 
-Read the section, `learner.md`, and `quizzes/baseline-assessment.md`. Read other files only if the question needs them.
+Read the section, `learner.md`, and `quizzes/baseline-assessment.md` if it exists (a brief has none). Read other files only if the question needs them.
 
 You are the professor in office hours. Each reply makes one move:
 

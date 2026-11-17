@@ -9,7 +9,7 @@ import { ROOT } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
-export type JobKind = "start" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson" | "worksheet";
+export type JobKind = "start" | "brief" | "assess" | "outline" | "module" | "test" | "wrap" | "drilldown" | "reading" | "grade" | "chat" | "variant" | "vocab" | "lesson" | "worksheet";
 type Lane = "heavy" | "light" | "background";
 const LANES: Lane[] = ["heavy", "light", "background"];
 export type Job = {
@@ -26,27 +26,30 @@ type Opts = {
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
-const LANE: Record<JobKind, Lane> = { start: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background", lesson: "heavy", worksheet: "heavy" };
+const LANE: Record<JobKind, Lane> = { start: "heavy", brief: "heavy", assess: "heavy", outline: "heavy", module: "heavy", test: "heavy", wrap: "heavy", drilldown: "heavy", reading: "heavy", grade: "light", chat: "light", variant: "background", vocab: "background", lesson: "heavy", worksheet: "heavy" };
 // Music research needs a few commands (the transcribe skill): save a source, render and read a PDF,
 // and check scores and passages. Nothing else in Bash.
 const MUSIC = "Bash(curl:*),Bash(pdftoppm:*),Bash(uv run:*),Bash(mkdir:*),Bash(bun run scripts/check-notation.ts:*)";
+// Lesson images through OpenRouter, for jobs that write sections.
+const IMAGE = "Bash(bun run scripts/gen-image.ts:*)";
 const TOOLS: Record<JobKind, string> = {
   start: "Read,Glob,Write,Agent,WebSearch,WebFetch",
+  brief: "Read,Glob,Write,Agent,WebSearch,WebFetch",
   assess: "Read,Glob,Write",
   outline: "Read,Glob,Write",
-  module: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${MUSIC}`,
+  module: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${MUSIC},${IMAGE}`,
   test: "Read,Glob,Write,Bash(bun run scripts/check-notation.ts:*)",
   wrap: "Read,Glob,Write",
-  drilldown: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch",
+  drilldown: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${IMAGE}`,
   reading: "Read,Glob,Write,WebSearch,WebFetch",
   grade: "Read",
   chat: "Read,Glob,Grep",
   variant: "Read",
   vocab: "Read",
-  lesson: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${MUSIC}`,
+  lesson: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${MUSIC},${IMAGE}`,
   worksheet: "Read,Glob,Grep,Write",
 };
-const COMMITS: Partial<Record<JobKind, true>> = { start: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true, worksheet: true };
+const COMMITS: Partial<Record<JobKind, true>> = { start: true, brief: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true, worksheet: true };
 
 const LOG_DIR = join(ROOT, "data/jobs");
 mkdirSync(LOG_DIR, { recursive: true });

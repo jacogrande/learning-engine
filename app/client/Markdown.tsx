@@ -1,5 +1,6 @@
-// Lesson renderer: Markdown + :::directives + typed fences (quiz, mermaid, abc). Fails per block, never per page.
-import { useEffect, useRef, useState, type ReactNode } from "react";
+// Lesson renderer: Markdown + :::directives + typed fences (quiz, mermaid, abc, chart, html) and course
+// images. Fails per block, never per page.
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { directive } from "micromark-extension-directive";
@@ -8,6 +9,7 @@ import { visit } from "unist-util-visit";
 import YAML from "yaml";
 import { Quiz, type QuizSpec } from "./Quiz";
 import { abcSourceProblems, tidyAbc, toSeconds, tuneProblems, youtubeProblems } from "../shared/notation";
+import { parseChart } from "../shared/visuals";
 
 // Block directives only: `:::name{…}` (container) and `::name{…}` (leaf). Inline `:name[…]{…}` is
 // not registered, so prose like "at 1:43", "a 3:2 ratio" or "1:43[^note]" stays exactly as written.
@@ -50,10 +52,9 @@ function inlineMarks() {
   return fold;
 }
 
-function Mermaid({ src }: { src: string }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [err, setErr] = useState<string | null>(null);
-  // Re-render when the theme changes: the picker, or the system scheme under "system".
+// A counter that changes with the theme (the picker, or the system scheme under "system"), so a
+// block drawn with theme colours redraws.
+function useThemeTick() {
   const [theme, setTheme] = useState(0);
   useEffect(() => {
     const bump = () => setTheme((n) => n + 1);
@@ -61,6 +62,14 @@ function Mermaid({ src }: { src: string }) {
     addEventListener("themechange", bump); mq.addEventListener("change", bump);
     return () => { removeEventListener("themechange", bump); mq.removeEventListener("change", bump); };
   }, []);
+  return theme;
+}
+const cssVar = (name: string) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+
+function Mermaid({ src }: { src: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const theme = useThemeTick();
   useEffect(() => {
     let live = true;
     import("mermaid").then(async ({ default: m }) => {
@@ -74,6 +83,95 @@ function Mermaid({ src }: { src: string }) {
     return () => { live = false; };
   }, [src, theme]);
   return err ? <pre className="block-error">{src}</pre> : <div className="mermaid" ref={ref} />;
+}
+
+// ```chart fences: a Vega-Lite spec, JSON or YAML, drawn by vega-embed. Vega is about a megabyte, so,
+// like abcjs, it loads from /vendor on the first chart. Colours and fonts come from the page theme.
+let vegaLoad: Promise<any> | null = null;
+function loadScript(src: string) {
+  return new Promise<void>((res, rej) => { const s = document.createElement("script"); s.src = src; s.async = false; s.onload = () => res(); s.onerror = () => rej(new Error(`${src} did not load`)); document.head.appendChild(s); });
+}
+function loadVega() {
+  return vegaLoad ??= (async () => {
+    const w = window as any;
+    if (!w.vega) await loadScript("/vendor/vega.js");
+    if (!w.vegaLite) await loadScript("/vendor/vega-lite.js");
+    if (!w.vegaEmbed) await loadScript("/vendor/vega-embed.js");
+    return w.vegaEmbed;
+  })().catch((e) => { vegaLoad = null; throw e; });
+}
+function Chart({ src }: { src: string }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const theme = useThemeTick();
+  useEffect(() => {
+    const { spec, error } = parseChart(src);
+    if (error) { setErr(error); return; }
+    let live = true, view: any = null;
+    const fg = cssVar("--fg"), muted = cssVar("--muted"), faint = cssVar("--faint"), accent = cssVar("--accent");
+    const font = getComputedStyle(document.body).fontFamily;
+    const config = {
+      background: "transparent", font, view: { stroke: "transparent" },
+      axis: { labelColor: muted, titleColor: fg, domainColor: faint, gridColor: faint, tickColor: faint, labelFontSize: 12, titleFontSize: 12, titleFontWeight: 600 },
+      legend: { labelColor: fg, titleColor: fg, labelFontSize: 12, titleFontSize: 12 },
+      title: { color: fg, fontSize: 14, anchor: "start" }, header: { labelColor: fg, titleColor: fg },
+      text: { color: fg }, mark: { color: accent }, range: { category: [accent, "#3b82c4", "#d9822b", "#8a63d2", "#d14d72", "#2a9d8f", "#7a7a7a"] },
+    };
+    loadVega().then(async (embed) => {
+      if (!live || !ref.current) return;
+      const res = await embed(ref.current, { width: "container", ...spec, config: { ...config, ...(spec.config ?? {}) } }, { actions: false, renderer: "svg" });
+      view = res.view; setErr(null);
+      if (!live) view.finalize();
+    }).catch((e) => live && setErr(`chart: ${(e as Error).message}`));
+    return () => { live = false; view?.finalize(); };
+  }, [src, theme]);
+  return (
+    <>
+      {err && <pre className="block-error" title={err}>{`${err}\n\n${src}`}</pre>}
+      <figure className="chart" data-noquote hidden={!!err}><div ref={ref} /></figure>
+    </>
+  );
+}
+
+// ```html fences: a UI mock or small interactive component, in a sandboxed frame. No same-origin
+// access and a CSP that blocks the network, so a mock can run its own script and nothing else.
+// The theme's colours arrive as CSS variables; the frame reports its height so it never scrolls.
+function HtmlMock({ src }: { src: string }) {
+  const ref = useRef<HTMLIFrameElement>(null);
+  const [height, setHeight] = useState(160);
+  const theme = useThemeTick();
+  const id = useRef(Math.random().toString(36).slice(2)).current;
+  useEffect(() => {
+    const on = (e: MessageEvent) => { if (e.source === ref.current?.contentWindow && e.data?.mock === id) setHeight(Math.min(2000, Math.ceil(e.data.height))); };
+    addEventListener("message", on); return () => removeEventListener("message", on);
+  }, [id]);
+  const vars = ["--bg", "--fg", "--muted", "--faint", "--line-strong", "--accent", "--accent-fill", "--accent-fg"].map((v) => `${v}:${cssVar(v)}`).join(";");
+  void theme;
+  const doc = `<!doctype html><html><head><meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:; font-src data:">
+<style>:root{${vars};color-scheme:light dark}*{box-sizing:border-box}html,body{margin:0}body{padding:16px;background:var(--bg);color:var(--fg);font:14px/1.45 ${getComputedStyle(document.body).fontFamily.replace(/"/g, "'")}}
+button,input,select,textarea{font:inherit;color:inherit}</style></head><body>${src}
+<script>(function(){var send=function(){parent.postMessage({mock:${JSON.stringify(id)},height:document.documentElement.scrollHeight},"*")};new ResizeObserver(send).observe(document.documentElement);addEventListener("load",send);send()})()</script></body></html>`;
+  return (
+    <figure className="html-mock" data-noquote>
+      <iframe ref={ref} title="Interactive mock" sandbox="allow-scripts allow-forms" srcDoc={doc} style={{ height }} />
+    </figure>
+  );
+}
+
+// Relative image paths resolve against the document's folder: `images/x.png` in
+// modules/01-foo/02-bar.md is modules/01-foo/images/x.png. Outside a course document they stay as written.
+const DocBase = createContext<{ slug: string; dir: string } | null>(null);
+function CourseImage({ src, alt, title }: { src?: string; alt?: string; title?: string }) {
+  const base = useContext(DocBase);
+  const [failed, setFailed] = useState(false);
+  if (!src) return null;
+  const relative = base && !/^(?:[a-z]+:|\/|#)/i.test(src);
+  const parts: string[] = [];
+  if (relative) for (const p of `${base.dir}/${src}`.split("/")) { if (p === "..") parts.pop(); else if (p && p !== ".") parts.push(p); }
+  const url = relative ? `/api/courses/${base.slug}/asset?path=${encodeURIComponent(parts.join("/"))}` : src;
+  if (failed) return <span className="block-error">{`image not found: ${src}`}</span>;
+  return <img src={url} alt={alt ?? ""} title={title} loading="lazy" className="lesson-image" onError={() => setFailed(true)} />;
 }
 
 // One player at a time: a score or a passage that starts playing pauses every other one on the page.
@@ -369,6 +467,8 @@ function YouTube({ v, t, end, title }: { v?: string; t?: string; end?: string; t
 function Fence({ lang, code, children }: { lang: string; code: string; children: ReactNode }) {
   if (lang === "mermaid") return <Mermaid src={code} />;
   if (lang === "abc") return <Abc src={code} />;
+  if (lang === "chart" || lang === "vega-lite") return <Chart src={code} />;
+  if (lang === "html") return <HtmlMock src={code} />;
   if (lang === "quiz") {
     try { const spec = YAML.parse(code) as QuizSpec; return <Quiz key={spec.id} spec={spec} />; }
     catch { return <pre className="block-error">{code}</pre>; }
@@ -381,6 +481,7 @@ function Fence({ lang, code, children }: { lang: string; code: string; children:
 const plugins = [remarkGfm, blockDirectives, directives, inlineMarks];
 const components = {
   pre: ({ children }: any) => <>{children}</>,   // fences are handled in `code`
+  img: ({ src, alt, title }: any) => <CourseImage src={src} alt={alt} title={title} />,
   code: ({ className, children, ...rest }: any) => {
     const lang = /language-(\w+)/.exec(className ?? "")?.[1];
     const code = String(children ?? "").replace(/\n$/, "");   // an empty fence has no children at all
@@ -400,6 +501,8 @@ const components = {
   },
 };
 
-export function Markdown({ body }: { body: string }) {
-  return <ReactMarkdown remarkPlugins={plugins} components={components}>{body}</ReactMarkdown>;
+// `doc` is the course and course-relative path of what is rendered, for resolving relative images.
+export function Markdown({ body, doc }: { body: string; doc?: { slug: string; path: string } }) {
+  const md = <ReactMarkdown remarkPlugins={plugins} components={components}>{body}</ReactMarkdown>;
+  return doc ? <DocBase.Provider value={{ slug: doc.slug, dir: doc.path.split("/").slice(0, -1).join("/") }}>{md}</DocBase.Provider> : md;
 }

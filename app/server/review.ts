@@ -6,7 +6,7 @@ import YAML from "yaml";
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, id, now } from "./db";
-import { COURSES_DIR, getDoc, listCourses } from "./content";
+import { COURSES_DIR, getDoc, listCourses, outOfReview } from "./content";
 import { state } from "./state";
 import { touch } from "./sync";
 import { VOCAB, reviewSpec, wordRow } from "./vocab-spec";
@@ -48,6 +48,14 @@ const passed = (l: any) => (l.difficulty != null ? l.result === "correct" : l.ra
 
 // A course's cards, plus the vocab cards that are that course's own terms.
 const inCourse = () => ` AND (course=? OR (course='${VOCAB}' AND module=?))`;
+// The reverse, for the unscoped modes: leave out the courses set to `review: false`, and their vocab.
+// Slugs are directory names; quoting guards the SQL all the same.
+async function notOptedOut(): Promise<string> {
+  const out = await outOfReview();
+  if (!out.length) return "";
+  const list = out.map((s) => `'${s.replace(/'/g, "''")}'`).join(",");
+  return ` AND course NOT IN (${list}) AND NOT (course='${VOCAB}' AND coalesce(module,'') IN (${list}))`;
+}
 
 export function rating(result: Result, confidence?: number | null): Grade {
   if (result === "correct") return confidence === 3 ? Rating.Easy : Rating.Good;
@@ -341,12 +349,17 @@ export async function queue(opts: { mode?: Mode; scope?: string; cap?: number; e
   const base = "suspended=0 AND state<>'orphaned'";
   let rows: Row[]; const args: string[] = [];
   let scopeWhere = "";
+  const optOut = opts.scope ? "" : await notOptedOut();
+  if (mode === "daily" && !opts.scope) scopeWhere = optOut;
   if (mode === "course" || (mode === "daily" && opts.scope)) { scopeWhere = inCourse(); args.push(opts.scope!, opts.scope!); }
   if (mode === "module" || mode === "cram") { const [c, m] = (opts.scope ?? "/").split("/"); scopeWhere = " AND course=? AND module=?"; args.push(c, m); }
   if (mode === "cram") scopeWhere += " AND doc NOT LIKE '%/quiz.md'";   // the module test is what cram prepares for, not part of it
   if (mode === "daily") rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} AND due<=?${notToday} ORDER BY due`).all(...args, now(), todayStart()) as Row[];
-  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? inCourse() : ""} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope, opts.scope] : []), cap) as Row[];
-  else if (mode === "weak") rows = (await weakRows()).filter((r) => !opts.scope || r.course === opts.scope || (r.course === VOCAB && r.module === opts.scope));
+  else if (mode === "burst") rows = db.query(`SELECT * FROM cards WHERE ${base}${opts.scope ? inCourse() : optOut} ORDER BY random() LIMIT ?`).all(...(opts.scope ? [opts.scope, opts.scope] : []), cap) as Row[];
+  else if (mode === "weak") {
+    const skip = new Set(opts.scope ? [] : await outOfReview());
+    rows = (await weakRows()).filter((r) => opts.scope ? r.course === opts.scope || (r.course === VOCAB && r.module === opts.scope) : !skip.has(r.course) && !(r.course === VOCAB && skip.has(r.module ?? "")));
+  }
   else rows = db.query(`SELECT * FROM cards WHERE ${base}${scopeWhere} ORDER BY due`).all(...args) as Row[];
 
   let items = await resolve(rows.filter((r) => !excl.has(key(r))), mode === "cram");
@@ -411,8 +424,8 @@ async function weakRows(): Promise<Row[]> {
 }
 
 // Counts for the courses page and the review page header.
-export function summary(course?: string) {
-  const where = `suspended=0 AND state<>'orphaned'${course ? inCourse() : ""}`;
+export async function summary(course?: string) {
+  const where = `suspended=0 AND state<>'orphaned'${course ? inCourse() : await notOptedOut()}`;
   const args = course ? [course, course] : [];
   const by = (sql: string) => (db.query(sql).get(...args) as any).n;
   // `dueCount` is what today's review still holds: due, not seen today, within the day's budget.
@@ -421,7 +434,7 @@ export function summary(course?: string) {
     doneToday: doneToday(),
     total: by(`SELECT count(*) n FROM cards WHERE ${where}`),
     learned: by(`SELECT count(*) n FROM cards WHERE ${where} AND state='learned'`),
-    suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? inCourse() : ""}`),
+    suspended: by(`SELECT count(*) n FROM cards WHERE suspended=1${course ? inCourse() : await notOptedOut()}`),
     seeded: seededCount(course),
     streak: streak(),
     next: (db.query(`SELECT min(due) d FROM cards WHERE ${where} AND due>'${now()}'`).get(...args) as any).d,

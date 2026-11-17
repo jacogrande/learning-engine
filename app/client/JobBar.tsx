@@ -4,7 +4,7 @@ import { get, post, useEvent, useJobs, type Job } from "./api";
 import { Link } from "./App";
 
 const label = (j: Job) => ({
-  start: `Starting course: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
+  start: `Starting course: ${j.ref}`, brief: `Researching brief: ${j.ref}`, assess: "Assessing baseline", outline: "Building outline", module: `Generating module ${j.ref}`,
   test: `Writing module test ${j.ref?.split("/")[0]}`, wrap: `Wrapping up ${j.ref?.split("/")[0]}`,
   drilldown: "Drilling down", reading: "Finding reading", grade: "Grading", chat: "Replying", variant: "Writing a review variant", vocab: "Writing a vocab entry", lesson: "Writing a new lesson", worksheet: "Writing a worksheet",
 }[j.kind]);

@@ -310,7 +310,7 @@ export function Reader({ slug, moduleId, file }: { slug: string; moduleId: strin
               </div>
             )}
             <QuizGrade value={{ saved, submit, cancel, chat: (context) => { setChatDraft(context); openPane("chat"); } }}>
-              <Markdown body={doc.body} />
+              <Markdown body={doc.body} doc={docPath ? { slug, path: docPath } : undefined} />
             </QuizGrade>
             {(isSection || extra?.kind === "worksheet") && <Practice slug={slug} here={here} section={isSection ? current! : extra!.section ?? ""} mod={mod} writing={jobs.some((j) => j.kind === "worksheet" && j.ref === `modules/${moduleId}/${isSection ? current : extra?.section}`)} />}
             <footer className="article-foot">

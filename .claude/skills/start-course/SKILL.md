@@ -30,6 +30,8 @@ title: "<Title>"
 depth: entry | practitioner | expert
 goals:
   - "<what the learner said they want to be able to do>"
+folder: "<only when the message's filing block names a Folder>"
+review: false   # only when the filing block says daily review is off
 ---
 <One paragraph: what this course covers and for whom. Voice rules apply.>
 ```

@@ -1,8 +1,8 @@
 // `bun run dev` — serves the client (bundled by Bun) and the API.
 import index from "./client/index.html";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { COURSES_DIR, NOTES_DIR, listCourses, getCourse, getDoc, type Course } from "./server/content";
+import { extname, join, resolve } from "node:path";
+import { COURSES_DIR, NOTES_DIR, listCourses, getCourse, getDoc, freeSlug, setCourseMeta, type Course } from "./server/content";
 import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
@@ -53,6 +53,27 @@ async function quizState(course: string, quiz: string) {
 const CONFIDENCE = ["", "guessing", "fairly sure", "sure"];
 
 type Sheet = { answers: Record<string, string>; confidence?: Record<string, number>; notes?: Record<string, string> };
+// A brief: one module on a topic, no baseline. The server picks the slug so it can generate the
+// module as soon as the research and the outline are written.
+async function startBrief(b: { subject: string; know?: string; goals?: string; produce?: string; angle?: string }, filing: string) {
+  const slug = await freeSlug(b.subject);
+  const answers = [
+    ["What they are building or deciding", b.produce], ["What they already know", b.know], ["What they need to be able to do or discuss", b.goals], ["Angle to emphasize or avoid", b.angle],
+  ].filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v!.trim()}`).join("\n");
+  const prompt = `/start-brief ${b.subject.trim()}\n\nSlug: ${slug}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given)"}${filing ? `\n\nFiling, for course.md:\n${filing}` : ""}`;
+  return enqueue("new", "brief", prompt, {
+    ref: b.subject.trim().slice(0, 60),
+    then: async () => {
+      const c = await getCourse(slug);
+      const m = c?.modules[0];
+      if (m && m.status === "planned") enqueue(slug, "module", `/generate-module ${slug} ${m.id}`, { ref: m.id, then: () => lintModule(slug, m.id) });
+    },
+  });
+}
+
+const VENDOR: Record<string, string> = { "vega.js": "vega/build/vega.min.js", "vega-lite.js": "vega-lite/build/vega-lite.min.js", "vega-embed.js": "vega-embed/build/vega-embed.min.js" };
+const IMAGE_TYPES: Record<string, string> = { ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif", ".svg": "image/svg+xml" };
+
 function assess(slug: string, attempt: Sheet & { id: string }) {
   // One entry per question: the answer, how sure the learner was, and their note if they left one.
   const sheet = Object.fromEntries(Object.entries(attempt.answers).map(([q, answer]) => {
@@ -345,14 +366,24 @@ Bun.serve({
       GET: async () => json(await Promise.all((await listCourses()).map(async (c) => ({ ...c, progress: await resumeOf(c) })))),
       // New course from the app: the clarifying answers come with the request, so the skill skips its questions.
       POST: async (req) => {
-        const b = (await req.json()) as { subject: string; depth?: string; know?: string; goals?: string; produce?: string; angle?: string };
+        const b = (await req.json()) as { subject: string; format?: "course" | "brief"; depth?: string; know?: string; goals?: string; produce?: string; angle?: string; folder?: string; review?: boolean };
         if (!b.subject?.trim()) return json({ error: "subject required" }, 400);
+        const filing = [b.folder?.trim() ? `- Folder: ${b.folder.trim()}` : "", b.review === false ? "- Daily review: off (write `review: false`)" : ""].filter(Boolean).join("\n");
+        if (b.format === "brief") return json(await startBrief(b, filing));
         const answers = [
           ["Target depth", b.depth], ["What they already know or have done", b.know], ["What they want to be able to do afterward", b.goals],
           ["What they are producing with it right now", b.produce], ["Angle to emphasize or avoid", b.angle],
         ].filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v!.trim()}`).join("\n");
-        const prompt = `/start-course ${b.subject.trim()}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given; choose sensible defaults for a working practitioner)"}`;
+        const prompt = `/start-course ${b.subject.trim()}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given; choose sensible defaults for a working practitioner)"}${filing ? `\n\nFiling, for course.md:\n${filing}` : ""}`;
         return json(enqueue("new", "start", prompt, { ref: b.subject.trim().slice(0, 60) }));
+      },
+    },
+    "/api/courses/:slug/meta": {
+      PUT: async (req) => {
+        const b = (await req.json()) as { folder?: string | null; review?: boolean };
+        if (!(await setCourseMeta(req.params.slug, b))) return json({ error: "not found" }, 404);
+        sync.touch();
+        return json(await getCourse(req.params.slug));
       },
     },
     "/api/courses/:slug": async (req) => {
@@ -607,8 +638,8 @@ Bun.serve({
         return json(job);
       },
     },
-    "/api/courses/:slug/review": async (req) => json({ ...summary(req.params.slug), mastery: mastery(req.params.slug) }),
-    "/api/review/summary": () => json(summary()),
+    "/api/courses/:slug/review": async (req) => json({ ...(await summary(req.params.slug)), mastery: mastery(req.params.slug) }),
+    "/api/review/summary": async () => json(await summary()),
     "/api/review": async (req) => {
       const u = new URL(req.url);
       const exclude = (u.searchParams.get("exclude") ?? "").split(",").filter(Boolean);
@@ -616,7 +647,7 @@ Bun.serve({
       const scope = u.searchParams.get("scope") ?? u.searchParams.get("course") ?? undefined;
       const cap = u.searchParams.get("cap") ? Number(u.searchParams.get("cap")) : undefined;
       const course = mode === "module" || mode === "cram" ? scope?.split("/")[0] : scope;
-      return json({ ...(await queue({ mode, scope, cap, exclude })), summary: summary(course), last: lastSession() });
+      return json({ ...(await queue({ mode, scope, cap, exclude })), summary: await summary(course), last: lastSession() });
     },
     "/api/review/settings": {
       GET: () => json(settings()),
@@ -681,6 +712,21 @@ Bun.serve({
 
     // abcjs's prebuilt file, loaded by the first score on a page instead of living in the app bundle.
     "/vendor/abcjs.js": () => new Response(Bun.file(join(import.meta.dir, "../node_modules/abcjs/dist/abcjs-basic-min.js")), { headers: { "content-type": "text/javascript", "cache-control": "max-age=86400" } }),
+
+    // Vega, Vega-Lite and vega-embed, loaded in that order by the first ```chart on a page.
+    "/vendor/:file": (req) => {
+      const f = VENDOR[req.params.file];
+      return f ? new Response(Bun.file(join(import.meta.dir, "../node_modules", f)), { headers: { "content-type": "text/javascript", "cache-control": "max-age=86400" } }) : new Response("not found", { status: 404 });
+    },
+
+    // Images a course ships (generated or saved), by course-relative path: modules/<id>/images/x.png.
+    "/api/courses/:slug/asset": async (req) => {
+      const dir = join(COURSES_DIR, req.params.slug), full = resolve(dir, q(req, "path"));
+      const type = IMAGE_TYPES[extname(full).toLowerCase()];
+      if (!full.startsWith(dir + "/") || !type) return new Response("not found", { status: 404 });
+      const f = Bun.file(full);
+      return (await f.exists()) ? new Response(f, { headers: { "content-type": type, "cache-control": "no-cache", "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'" } }) : new Response("not found", { status: 404 });
+    },
 
     // --- vocabulary ---------------------------------------------------------
     "/api/vocab": {

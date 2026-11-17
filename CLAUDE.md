@@ -6,7 +6,7 @@ A personal course system. Claude Code researches a subject, writes the course as
 
 ```
 library/content/courses/<slug>/
-  course.md                      # frontmatter: title, depth, goals; body: one-paragraph description
+  course.md                      # frontmatter: title, depth, goals, optional format/folder/review (below); body: one-paragraph description
   learner.md                     # profile: domains, per-objective level, vocabulary, error patterns (start-course seeds; assess, outline and wrap-module update)
   research/*.md                  # breadth research from /start-course; map.md is the planning doc
   quizzes/baseline.md            # diagnostic: quiz blocks only
@@ -21,6 +21,8 @@ library/content/courses/<slug>/
     flashcards/                  # quiz blocks a chat made on request; review cards only, not sections
     worksheets/                  # practice pages made from a section (frontmatter: title, section), 5-14 quiz blocks (the learner picks the size)
 ```
+
+A course with `format: brief` in `course.md` is a brief: one module, no baseline (`/start-brief` writes it). `folder: "Work"` groups a course on the home page; `review: false` keeps its cards out of the daily review (its own review page still serves them).
 
 Objectives live in `outline.md`. Their ids are positional: the second objective of module `03-foo` is `obj-03-2`. Skill arguments arrive as `$ARGUMENTS`, space-separated, in the order the skill names them.
 

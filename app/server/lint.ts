@@ -6,6 +6,9 @@ import YAML from "yaml";
 import abcjs from "abcjs";
 import { COURSES_DIR, parseDoc } from "./content";
 import { abcSourceProblems, tidyAbc, tuneProblems, youtubeProblems } from "../shared/notation";
+import { imageRefs, mockProblems, parseChart } from "../shared/visuals";
+import { existsSync } from "node:fs";
+import { dirname } from "node:path";
 
 const ID = /^q-(base-\d{2}|\d{2}-(r\d|t\d{2}|dd\d{2}|fc\d{2,3}|ws\d{2,3}|\d{2}))$/;
 const OBJ = /^obj-\d{2}-\d+$/;
@@ -48,11 +51,24 @@ export async function lint(course: string, mod: string): Promise<string[]> {
       } else problems.push(`${f}: ${id} has unknown type "${q?.type}"`);
     }
     problems.push(...notation(doc.body).map((p) => `${f}: ${p}`));
+    problems.push(...visuals(doc.body, dirname(join(dir, f))).map((p) => `${f}: ${p}`));
     const words = doc.body.replace(/```[\s\S]*?```/g, "").replace(/:::[\s\S]*?:::/g, "").split(/\s+/).filter(Boolean).length;
     if (sheet && (fences.length < 5 || fences.length > 14)) problems.push(`${f}: ${fences.length} exercises; a worksheet has five to fourteen`);
     if (!sheet && f !== "quiz.md" && f !== "understanding.md" && words > 420) problems.push(`${f}: ${words} words of prose (ceiling 350)`);
   }
   return problems;
+}
+
+// Charts that do not parse, mocks that reach for the network, images that are not on disk.
+export function visuals(body: string, dir: string): string[] {
+  const out: string[] = [];
+  for (const [, src] of body.matchAll(/^```(?:chart|vega-lite)\n([\s\S]*?)^```/gm)) { const { error } = parseChart(src); if (error) out.push(error); }
+  for (const [, src] of body.matchAll(/^```html\n([\s\S]*?)^```/gm)) out.push(...mockProblems(src));
+  for (const { alt, src } of imageRefs(body)) {
+    if (!existsSync(join(dir, src))) out.push(`image ${src} is not on disk`);
+    if (!alt.trim()) out.push(`image ${src} has no alt text`);
+  }
+  return out;
 }
 
 // Notation and passages, read the way the reader will: abc fences (one tune, every bar full, no parser

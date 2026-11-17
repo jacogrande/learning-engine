@@ -779,3 +779,26 @@ input.train-input { max-width: 22rem; }
 .video-rate { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
 .video-rate select { font: inherit; font-size: var(--fs-caption); color: var(--fg); background: var(--bg); border: var(--hairline) solid var(--faint); border-radius: var(--radius-1); padding: 2px 4px; }
 @media (max-width: 480px) { .video-rate { display: none; } }
+
+/* Folders on the courses page, and a course's filing controls. */
+.folder { margin: var(--s-6) 0 0; }
+.folder > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: var(--s-2); padding: 0 0 var(--s-2); font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
+.folder > summary::-webkit-details-marker { display: none; }
+.folder > summary::before { content: "▸"; font-size: .8em; transition: transform .15s; }
+.folder[open] > summary::before { transform: rotate(90deg); }
+.folder .folder-name { color: var(--fg); }
+.filing { display: flex; flex-wrap: wrap; gap: var(--s-4); align-items: center; margin: var(--s-7, 3rem) 0 0; padding-top: var(--s-4); border-top: var(--hairline) solid var(--faint); font-size: var(--fs-small); }
+.filing label { display: inline-flex; align-items: center; gap: var(--s-2); }
+.filing input:not([type]) { font: inherit; padding: var(--s-1) var(--s-2); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; width: 10rem; }
+.new-course label.check { flex-direction: row; align-items: center; gap: var(--s-2); font-weight: 400; }
+.new-course .segmented { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.new-course .segmented button { flex: 1 1 12rem; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left; padding: var(--s-3); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; font: inherit; font-weight: 600; cursor: pointer; }
+.new-course .segmented button .muted { font-weight: 400; font-size: var(--fs-small); }
+.new-course .segmented button.active { border-color: var(--fg); box-shadow: inset 0 0 0 1px var(--fg); }
+
+/* Charts, HTML mocks and images in lessons. */
+figure.chart { margin: var(--s-5) 0; }
+figure.chart > div { width: 100%; }
+figure.html-mock { margin: var(--s-5) 0; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-3); overflow: hidden; }
+figure.html-mock iframe { display: block; width: 100%; border: 0; background: var(--bg); }
+img.lesson-image { display: block; max-width: 100%; height: auto; margin: var(--s-5) auto; border-radius: var(--radius-2); }

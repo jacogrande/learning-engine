@@ -166,10 +166,11 @@ function ReadingMenu() {
 function Courses() {
   const { data } = useLive<Course[]>("/api/courses");
   const jobs = useJobs();
-  const starting = jobs.filter((j) => j.kind === "start");
+  const starting = jobs.filter((j) => j.kind === "start" || j.kind === "brief");
   const [open, setOpen] = useState(false);
   const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer", "card"]);
   const status = (c: Course) => {
+    if (c.format === "brief") return c.modules[0]?.status === "ready" ? (c.progress?.done ? "Brief · done" : "Brief") : "Brief · writing";
     if (c.stage === "baseline") return "Baseline waiting";
     if (c.stage === "assessed") return "Outline pending";
     const done = c.progress?.done ?? 0, n = c.modules.length;
@@ -192,32 +193,92 @@ function Courses() {
           {rv.dueCount === 0 && rv.next && <span className="muted"> · next {new Date(rv.next).toLocaleDateString()}</span>}
         </p>
       )}
-      {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — researching the subject and writing the baseline. It appears below when ready ({j.activity ?? "queued"}).</p>)}
+      {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — {j.kind === "brief" ? "researching the topic and planning the brief; the module writes itself after" : "researching the subject and writing the baseline"}. It appears below when ready ({j.activity ?? "queued"}).</p>)}
       {data?.length === 0 && starting.length === 0 && !open && (
         <p className="muted">No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
       )}
-      <ul className="cards">
-        {data?.map((c) => (
-          <li key={c.slug}>
-            <Link to={c.stage === "baseline" ? `/c/${c.slug}/baseline` : `/c/${c.slug}`}>
-              <h2>{c.title}</h2>
-              <p className="muted">{status(c)}{c.depth ? ` · ${c.depth}` : ""}</p>
-            </Link>
-            {resume(c)}
-          </li>
-        ))}
-      </ul>
+      {groups(data ?? []).map(([folder, cs]) => {
+        const list = (
+          <ul className="cards">
+            {cs.map((c) => (
+              <li key={c.slug}>
+                <Link to={c.stage === "baseline" && c.format !== "brief" ? `/c/${c.slug}/baseline` : `/c/${c.slug}`}>
+                  <h2>{c.title}</h2>
+                  <p className="muted">{status(c)}{c.depth && c.format !== "brief" ? ` · ${c.depth}` : ""}{c.review ? "" : " · not in daily review"}</p>
+                </Link>
+                {resume(c)}
+              </li>
+            ))}
+          </ul>
+        );
+        return folder === null ? <div key="">{list}</div> : <Folder key={folder} name={folder} count={cs.length}>{list}</Folder>;
+      })}
     </Shell>
   );
 }
 
-// The clarifying questions /start-course would ask in a terminal, asked here instead.
-function NewCourse({ onDone }: { onDone: () => void }) {
-  const [f, setF] = useState({ subject: "", depth: "practitioner", know: "", goals: "", produce: "", angle: "" });
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
-  const [busy, setBusy] = useState(false);
+// Unfiled courses first, then each folder in name order.
+function groups(cs: Course[]): [string | null, Course[]][] {
+  const by = new Map<string | null, Course[]>();
+  for (const c of cs) (by.get(c.folder) ?? by.set(c.folder, []).get(c.folder)!).push(c);
+  return [...by.entries()].sort(([a], [b]) => (a === null ? -1 : b === null ? 1 : a.localeCompare(b)));
+}
+
+// A folder on the courses page. Open or closed is remembered per browser.
+function Folder({ name, count, children }: { name: string; count: number; children: React.ReactNode }) {
+  const key = `folder:${name}`;
+  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== "closed"; } catch { return true; } });
   return (
-    <form className="new-course" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await post("/api/courses", f); onDone(); }}>
+    <details className="folder" open={open} onToggle={(e) => {
+      const o = (e.currentTarget as HTMLDetailsElement).open; setOpen(o);
+      try { localStorage.setItem(key, o ? "open" : "closed"); } catch {}
+    }}>
+      <summary><span className="folder-name">{name}</span> <span className="muted">{count}</span></summary>
+      {children}
+    </details>
+  );
+}
+
+// The clarifying questions /start-course (or /start-brief) would ask in a terminal, asked here instead.
+function NewCourse({ onDone }: { onDone: () => void }) {
+  const [f, setF] = useState({ format: "course", subject: "", depth: "practitioner", know: "", goals: "", produce: "", angle: "", folder: "" });
+  const [review, setReview] = useState(true);
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  const setFormat = (format: string) => {
+    // A brief is usually work: file it there and keep it out of the daily review, unless changed.
+    setF({ ...f, format, folder: format === "brief" && !f.folder ? "Work" : format === "course" && f.folder === "Work" ? "" : f.folder });
+    setReview(format !== "brief");
+  };
+  const [busy, setBusy] = useState(false);
+  const brief = f.format === "brief";
+  const filing = (
+    <>
+      <label>Folder <span className="muted">(optional; groups it on this page)</span><input value={f.folder} onChange={set("folder")} placeholder="e.g. Work" /></label>
+      <label className="check"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Include in the daily review <span className="muted">(its own review page works either way)</span></label>
+    </>
+  );
+  return (
+    <form className="new-course" onSubmit={async (e) => { e.preventDefault(); setBusy(true); await post("/api/courses", { ...f, review }); onDone(); }}>
+      <div className="segmented" role="radiogroup" aria-label="Format">
+        <button type="button" role="radio" aria-checked={!brief} className={!brief ? "active" : ""} onClick={() => setFormat("course")}>Course <span className="muted">baseline, outline, several modules</span></button>
+        <button type="button" role="radio" aria-checked={brief} className={brief ? "active" : ""} onClick={() => setFormat("brief")}>Brief <span className="muted">one module, fast, no baseline</span></button>
+      </div>
+      {brief ? (
+        <>
+          <label>Topic<input autoFocus required value={f.subject} onChange={set("subject")} placeholder="e.g. campsite availability rules for admins" /></label>
+          <label>What are you building or deciding? <span className="muted">(examples come from here)</span><textarea rows={2} value={f.produce} onChange={set("produce")} placeholder="e.g. a feature letting park admins set booking windows, minimum stays and blackout dates" /></label>
+          <label>What do you need to be able to do or discuss? <span className="muted">(optional)</span><textarea rows={2} value={f.goals} onChange={set("goals")} placeholder="e.g. hold my own in a spec review; know which patterns competitors ship" /></label>
+          <label>What do you already know? <span className="muted">(optional)</span><textarea rows={2} value={f.know} onChange={set("know")} /></label>
+          <label>Anything to emphasize or avoid? <span className="muted">(optional)</span><input value={f.angle} onChange={set("angle")} /></label>
+          {filing}
+          <div className="actions">
+            <button type="submit" className="primary" disabled={busy || !f.subject.trim()}>{busy ? "Starting…" : "Start brief"}</button>
+            <button type="button" onClick={onDone}>Cancel</button>
+            <span className="muted">Research, then the module: about fifteen minutes.</span>
+          </div>
+        </>
+      ) : (
+      <>
       <label>Subject<input autoFocus required value={f.subject} onChange={set("subject")} placeholder="e.g. lean methodology in business" /></label>
       <label>Depth
         <select value={f.depth} onChange={set("depth")}>
@@ -230,11 +291,14 @@ function NewCourse({ onDone }: { onDone: () => void }) {
       <label>What do you want to be able to do afterward?<textarea rows={2} value={f.goals} onChange={set("goals")} /></label>
       <label>What are you producing with it right now? <span className="muted">(examples come from here)</span><textarea rows={2} value={f.produce} onChange={set("produce")} placeholder="e.g. weekly status emails, product specs, short fiction" /></label>
       <label>Anything to emphasize or avoid? <span className="muted">(optional)</span><input value={f.angle} onChange={set("angle")} /></label>
+      {filing}
       <div className="actions">
         <button type="submit" className="primary" disabled={busy || !f.subject.trim()}>{busy ? "Starting…" : "Start course"}</button>
         <button type="button" onClick={onDone}>Cancel</button>
         <span className="muted">Research and the baseline take about five minutes.</span>
       </div>
+      </>
+      )}
     </form>
   );
 }
@@ -252,16 +316,34 @@ function CoursePage({ slug, tab }: { slug: string; tab: "outline" | "baseline" }
       {course.description && <p className="lede">{course.description}</p>}
       <nav className="tabs">
         <Link to={`/c/${slug}`} className={tab === "outline" ? "active" : ""}>Outline</Link>
-        <Link to={`/c/${slug}/baseline`} className={tab === "baseline" ? "active" : ""}>
-          Baseline{state.attempt?.grade ? <span className="level">{state.attempt.grade.level}</span> : null}
-        </Link>
+        {course.format !== "brief" && (
+          <Link to={`/c/${slug}/baseline`} className={tab === "baseline" ? "active" : ""}>
+            Baseline{state.attempt?.grade ? <span className="level">{state.attempt.grade.level}</span> : null}
+          </Link>
+        )}
         {review && review.total > 0 && (
           <Link to={`/c/${slug}/review`}>Review{review.dueCount > 0 ? <span className="level due">{review.dueCount} due</span> : null}</Link>
         )}
         {course.stage === "ready" && <Link to={`/c/${slug}/notebook`}>Notebook</Link>}
       </nav>
       {tab === "outline" ? <Outline course={course} /> : <Baseline slug={slug} state={state} reload={reload} />}
+      <Filing course={course} />
     </Shell>
+  );
+}
+
+// Folder and daily-review membership, written to course.md.
+function Filing({ course }: { course: Course }) {
+  const [folder, setFolder] = useState(course.folder ?? "");
+  useEffect(() => setFolder(course.folder ?? ""), [course.folder]);
+  const save = (b: { folder?: string; review?: boolean }) => put(`/api/courses/${course.slug}/meta`, b);
+  return (
+    <div className="filing muted">
+      <label>Folder <input value={folder} placeholder="none" onChange={(e) => setFolder(e.target.value)}
+        onBlur={() => folder.trim() !== (course.folder ?? "") && save({ folder: folder.trim() })}
+        onKeyDown={(e) => e.key === "Enter" && (e.currentTarget as HTMLInputElement).blur()} /></label>
+      <label className="check"><input type="checkbox" checked={course.review} onChange={(e) => save({ review: e.target.checked })} /> In the daily review</label>
+    </div>
   );
 }
 
@@ -272,6 +354,8 @@ function Outline({ course }: { course: Course }) {
   // The last run for a module, if it did not finish: shown so a Generate click reads as "resume".
   const broken = (ref: string) => past?.find((j) => j.ref === ref && ["interrupted", "failed", "cancelled"].includes(j.status));
 
+  if (course.format === "brief" && course.stage !== "ready")
+    return <p className="muted empty">Researching the topic. The module plan appears here when the research is done, and the module starts writing itself right after.</p>;
   if (course.stage === "baseline")
     return <p className="muted empty">The outline is built from your baseline. <Link to={`/c/${course.slug}/baseline`}>Take it first →</Link></p>;
   if (course.stage === "assessed")

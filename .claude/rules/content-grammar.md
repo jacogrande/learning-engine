@@ -1,6 +1,6 @@
 # Content grammar
 
-Every file under `library/content/courses/` is Markdown the app renders with fixed components. No HTML or JSX. A malformed block renders as an error card.
+Every file under `library/content/courses/` is Markdown the app renders with fixed components. No HTML or JSX in the prose; HTML goes only in an `html` fence (see Mocks). A malformed block renders as an error card.
 
 ## Frontmatter
 
@@ -29,9 +29,21 @@ One question the reader answers in their head before reading on. Once per sectio
 :::
 ```
 
-## Diagrams
+## Visuals
 
-Only for a relation the prose has not already stated, with four or more nodes. Short labels; no parentheses or quotes in node labels.
+A visual earns its place when it shows something the prose would take a paragraph to say: a structure, a flow, a quantity, an interface, a place. Never one that repeats a sentence beside it. Each sits right after the prose that refers to it, and the prose says what to look at. Pick the form by what is shown:
+
+| Showing | Use |
+|---|---|
+| Steps, states, sequences, entities and relations | `mermaid` |
+| Numbers: a comparison, a trend, a distribution | `chart` |
+| A screen, a form, a UI pattern, a small interactive model | `html` |
+| A comparison across several attributes | a GFM table |
+| A scene, a physical object, a place, a metaphor no diagram can draw | a generated image |
+
+### Diagrams
+
+A `mermaid` fence: `flowchart`, `sequenceDiagram`, `stateDiagram-v2`, `erDiagram`, `timeline`, `quadrantChart`. Only for a relation the prose has not already stated, with four or more nodes. Short labels; no parentheses or quotes in node labels.
 
 ````markdown
 ```mermaid
@@ -39,6 +51,44 @@ flowchart LR
   A[Order] --> B[Cut] --> C[Weld]
 ```
 ````
+
+### Charts
+
+A `chart` fence holds one [Vega-Lite](https://vega.github.io/vega-lite/) spec as JSON, with the data inline under `data.values`. The app sets width, colours and fonts from the page theme, so omit `width`, `$schema` and colours unless a colour carries meaning. Give every axis a `title`. Real numbers only, each from a source the prose links; an illustrative shape says so in the prose.
+
+````markdown
+```chart
+{
+  "data": {"values": [{"rule": "Min stay", "share": 71}, {"rule": "Booking window", "share": 64}, {"rule": "Blackout dates", "share": 38}]},
+  "mark": "bar",
+  "encoding": {
+    "y": {"field": "rule", "type": "nominal", "title": null, "sort": "-x"},
+    "x": {"field": "share", "type": "quantitative", "title": "Parks using the rule, %"}
+  }
+}
+```
+````
+
+### Mocks
+
+An `html` fence holds a self-contained fragment: markup, a `<style>` and, when it needs to respond, a `<script>`. It renders in a sandboxed frame with no network, so no external fonts, images, scripts or fetches; draw icons inline as SVG. Use the theme's variables for colour (`var(--fg)`, `var(--bg)`, `var(--muted)`, `var(--faint)`, `var(--line-strong)`, `var(--accent)`, `var(--accent-fill)`) so the mock follows light and dark. Keep it under about 150 lines and 600px tall. A mock shows one pattern; a contrast pair is two mocks, or one mock with a toggle. A mock is never a quiz: questions go in a `quiz` block after it.
+
+````markdown
+```html
+<style>.row{display:flex;gap:8px;align-items:center;padding:8px 0;border-bottom:1px solid var(--faint)}</style>
+<div class="row"><b>Minimum stay</b><input type="number" value="2" style="width:4em"> nights, Fri–Sat only</div>
+```
+````
+
+### Images
+
+`![Alt text that says what the image shows](images/site-map.png)`, the path relative to the file that shows it. Generate one with
+
+```
+bun run scripts/gen-image.ts library/content/courses/<slug>/modules/<id>/images/<name>.png "<prompt>" [--aspect 16:9]
+```
+
+which saves the image and, beside it, the prompt. Write the prompt as an art brief: subject, composition, style (flat illustration, diagrammatic, photographic), palette, and every text label spelled exactly. Use an image only when no other form above can show it; at most two per module, since each costs money and a minute. Never generate a chart, a diagram, a screenshot of a real product, or a real person's likeness. When the script fails, write the section without the image and say so in the reply.
 
 ## Notation
 

@@ -2,7 +2,7 @@
 name: drill-down
 description: Go deeper on a passage the learner selected; research it and write a short companion document.
 argument-hint: "<slug> <doc-path>"
-allowed-tools: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch"
+allowed-tools: "Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,Bash"
 disable-model-invocation: true
 ---
 
