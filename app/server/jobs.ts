@@ -5,7 +5,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, id, now } from "./db";
-import { ROOT } from "./content";
+import { ROOT, folderContextBlock } from "./content";
 import { broadcast } from "./events";
 import { commit as syncCommit, flush } from "./sync";
 
@@ -23,6 +23,7 @@ type Opts = {
   stream?: (text: string, reset?: boolean) => void;   // text deltas, for chat; reset at each new assistant turn
   then?: (result: unknown, job: Job) => unknown;   // may be async; a rejection fails nothing else
   fail?: (job: Job) => void;
+  folder?: string | null;                          // a course not yet made: the folder it is being made in
 };
 type Queued = Job & { _prompt: string; _opts: Opts };
 
@@ -49,6 +50,10 @@ const TOOLS: Record<JobKind, string> = {
   lesson: `Read,Glob,Grep,Write,Agent,WebSearch,WebFetch,${MUSIC},${IMAGE}`,
   worksheet: "Read,Glob,Grep,Write",
 };
+// Jobs that write course content read the course's folder contexts (appended to the prompt when the
+// job starts, so an edit made while it waited in the queue still counts). Not grading, chat or vocab:
+// chat resumes a session each turn and would repeat it.
+const FOLDER_CONTEXT: Partial<Record<JobKind, true>> = { start: true, brief: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true, worksheet: true, variant: true };
 const COMMITS: Partial<Record<JobKind, true>> = { start: true, brief: true, assess: true, outline: true, module: true, test: true, wrap: true, drilldown: true, reading: true, lesson: true, worksheet: true };
 
 const LOG_DIR = join(ROOT, "data/jobs");
@@ -142,7 +147,7 @@ function pump(lane: Lane) {
   const job = queues[lane].shift()!;
   const o = job._opts;
   const args = [
-    "-p", job._prompt,
+    "-p", job._prompt + (FOLDER_CONTEXT[job.kind] ? folderContextBlock(job.course, o.folder) : ""),
     "--output-format", "stream-json", "--verbose",
     ...(o.stream ? ["--include-partial-messages"] : []),
     "--permission-mode", "acceptEdits",

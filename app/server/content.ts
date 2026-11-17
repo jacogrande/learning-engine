@@ -1,6 +1,7 @@
 // Reads courses from content/courses/<slug>/. Files are the source of truth; nothing is cached.
-import { readdir, readFile, stat, writeFile } from "node:fs/promises";
-import { join, resolve, basename } from "node:path";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { join, resolve, basename, dirname } from "node:path";
 import YAML from "yaml";
 
 export const ROOT = resolve(import.meta.dir, "../..");
@@ -118,7 +119,7 @@ export async function getCourse(slug: string): Promise<Course | null> {
   const fm = course.frontmatter;
   return {
     slug, title: fm.title ?? slug, depth: fm.depth, description: course.body.trim(),
-    format: fm.format === "brief" ? "brief" : "course", folder: typeof fm.folder === "string" && fm.folder.trim() ? fm.folder.trim() : null,
+    format: fm.format === "brief" ? "brief" : "course", folder: typeof fm.folder === "string" && normFolder(fm.folder) ? normFolder(fm.folder) : null,
     review: fm.review !== false && fm.review !== "false", stage, modules,
   };
 }
@@ -138,6 +139,83 @@ export async function freeSlug(subject: string): Promise<string> {
   for (let n = 1; ; n++) { const s = n === 1 ? base : `${base}-${n}`; if (!(await exists(join(COURSES_DIR, s)))) return s; }
 }
 
+// Folders. A course's `folder` is a path, "Work" or "Work/Clients". Folders with no course in them
+// yet are kept in content/folders.json, so a folder can be made before anything is filed in it.
+export const FOLDERS_FILE = join(LIBRARY, "content/folders.json");
+export const normFolder = (p: string) => p.split("/").map((s) => s.trim().replace(/\|/g, "")).filter((s) => s && s !== "." && s !== "..").join("/");
+async function savedFolders(): Promise<string[]> {
+  try { const v = JSON.parse(await readFile(FOLDERS_FILE, "utf8")); return Array.isArray(v) ? v.filter((x) => typeof x === "string") : []; } catch { return []; }
+}
+const saveFolders = (list: string[]) => writeFile(FOLDERS_FILE, JSON.stringify([...new Set(list)].sort(), null, 2) + "\n");
+// Every folder: the saved ones, every course's, and each one's ancestors.
+export async function listFolders(): Promise<string[]> {
+  const all = new Set<string>();
+  const add = (p: string) => { const parts = normFolder(p).split("/").filter(Boolean); for (let i = 1; i <= parts.length; i++) all.add(parts.slice(0, i).join("/")); };
+  for (const f of await savedFolders()) add(f);
+  // Only each course.md (mtime-cached), not the whole course: this runs on every folder change.
+  const slugs = (await readdir(COURSES_DIR, { withFileTypes: true }).catch(() => [])).filter((d) => d.isDirectory()).map((d) => d.name);
+  for (const slug of slugs) { const f = (await readDoc(join(COURSES_DIR, slug, "course.md")))?.frontmatter.folder; if (typeof f === "string") add(f); }
+  return [...all].sort();
+}
+export async function addFolder(path: string) {
+  const p = normFolder(path); if (!p) return null;
+  await saveFolders([...(await savedFolders()), p]);
+  return p;
+}
+const under = (f: string, root: string) => f === root || f.startsWith(root + "/");
+// Folder context: a markdown note per folder, content/folders/<path>.md, that every generation job
+// for a course in that folder (at any depth) reads. See folderContextBlock.
+export const FOLDER_CONTEXT_DIR = join(LIBRARY, "content/folders");
+const contextFile = (p: string) => join(FOLDER_CONTEXT_DIR, ...normFolder(p).split("/")) + ".md";
+export async function getFolderContext(p: string) { return normFolder(p) ? readFile(contextFile(p), "utf8").catch(() => "") : ""; }
+export async function setFolderContext(p: string, markdown: string) {
+  if (!normFolder(p)) return false;
+  const f = contextFile(p);
+  if (!markdown.trim()) await rm(f, { force: true });
+  else { await mkdir(dirname(f), { recursive: true }); await writeFile(f, markdown.trimEnd() + "\n"); }
+  return true;
+}
+// The contexts a course inherits, top folder first, as a block to append to a job's prompt.
+// Synchronous: the job runner builds its command line in one go. `folder` stands in for a
+// course that does not exist yet (a new course or brief being started inside a folder).
+export function folderContextBlock(slug: string, folder?: string | null): string {
+  let f = folder ?? null;
+  if (f === null && slug !== "new") {
+    try { const fm = parseDoc(readFileSync(join(COURSES_DIR, slug, "course.md"), "utf8")).frontmatter; f = typeof fm.folder === "string" ? fm.folder : null; } catch {}
+  }
+  const path = f ? normFolder(f) : "";
+  if (!path) return "";
+  const parts = path.split("/").map((_, i, a) => a.slice(0, i + 1).join("/"))
+    .map((p) => { try { const md = readFileSync(contextFile(p), "utf8").trim(); return md ? `### ${p.split("/").join(" › ")}\n\n${md}` : ""; } catch { return ""; } })
+    .filter(Boolean);
+  if (!parts.length) return "";
+  return `\n\n## Folder context\n\nThis course sits in the folder ${path.split("/").join(" › ")}. The learner wrote these notes on that folder and each one above it, outermost first; a deeper folder's note is more specific and wins where they differ. Use them as standing context about the learner, their work and how they want material shaped: draw examples, emphasis and terminology from them. They come after this skill's rules and the content grammar, never instead of them.\n\n${parts.join("\n\n")}\n`;
+}
+
+// Renames a folder and everything under it: the saved list, every course filed there, and the
+// folder contexts.
+export async function renameFolder(from: string, to: string) {
+  const a = normFolder(from), b = normFolder(to);
+  if (!a || !b || a === b || under(b, a)) return false;
+  const swap = (f: string) => (under(f, a) ? b + f.slice(a.length) : f);
+  const fromBase = join(FOLDER_CONTEXT_DIR, ...a.split("/")), toBase = join(FOLDER_CONTEXT_DIR, ...b.split("/"));
+  await mkdir(dirname(toBase), { recursive: true });
+  await rename(fromBase + ".md", toBase + ".md").catch(() => {});
+  await rename(fromBase, toBase).catch(() => {});
+  await saveFolders((await savedFolders()).map(swap));
+  for (const c of await listCourses()) if (c.folder && under(c.folder, a)) await setCourseMeta(c.slug, { folder: swap(c.folder) });
+  return true;
+}
+// Removes a folder that holds no course, at any depth.
+export async function removeFolder(path: string) {
+  const p = normFolder(path);
+  if ((await listCourses()).some((c) => c.folder && under(c.folder, p))) return false;
+  await saveFolders((await savedFolders()).filter((f) => !under(f, p)));
+  const base = join(FOLDER_CONTEXT_DIR, ...p.split("/"));
+  await rm(base + ".md", { force: true }); await rm(base, { recursive: true, force: true });
+  return true;
+}
+
 // Sets `folder` and `review` in course.md, keeping every other line of the file as written.
 export async function setCourseMeta(slug: string, meta: { folder?: string | null; review?: boolean }): Promise<boolean> {
   const p = join(COURSES_DIR, slug, "course.md");
@@ -150,7 +228,7 @@ export async function setCourseMeta(slug: string, meta: { folder?: string | null
     if (line === null) { if (i >= 0) lines.splice(i, 1); }
     else if (i >= 0) lines[i] = line; else lines.push(line);
   };
-  if (meta.folder !== undefined) put("folder", meta.folder?.trim() ? `folder: ${JSON.stringify(meta.folder.trim())}` : null);
+  if (meta.folder !== undefined) put("folder", meta.folder && normFolder(meta.folder) ? `folder: ${JSON.stringify(normFolder(meta.folder))}` : null);
   if (meta.review !== undefined) put("review", meta.review ? null : "review: false");
   await writeFile(p, `---\n${lines.join("\n")}\n---\n${src.slice(m[0].length)}`);
   return true;

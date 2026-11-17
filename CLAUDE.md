@@ -22,7 +22,7 @@ library/content/courses/<slug>/
     worksheets/                  # practice pages made from a section (frontmatter: title, section), 5-14 quiz blocks (the learner picks the size)
 ```
 
-A course with `format: brief` in `course.md` is a brief: one module, no baseline (`/start-brief` writes it). `folder: "Work"` groups a course on the home page; `review: false` keeps its cards out of the daily review (its own review page still serves them).
+A course with `format: brief` in `course.md` is a brief: one module, no baseline (`/start-brief` writes it). `folder: "Work"` (a path: `Work/Clients` nests) groups a course on the home page; `review: false` keeps its cards out of the daily review (its own review page still serves them). Each folder may have a context note, `library/content/folders/<path>.md`, written by the learner; the app appends the chain for a course's folder, outermost first, to every content-generating job's prompt under "## Folder context". Read it as standing context about the learner and their work; never edit those files.
 
 Objectives live in `outline.md`. Their ids are positional: the second objective of module `03-foo` is `obj-03-2`. Skill arguments arrive as `$ARGUMENTS`, space-separated, in the order the skill names them.
 

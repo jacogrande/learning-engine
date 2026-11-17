@@ -546,6 +546,9 @@ ul.block-note { padding-left: var(--s-6); }
 .page-head h1 { margin: 0; }
 .new-course { display: flex; flex-direction: column; gap: var(--s-4); padding: var(--s-5); margin: 0 0 var(--s-6); border: var(--hairline) solid var(--faint); border-radius: var(--radius-3); }
 .new-course label { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; }
+/* Label text and its hint share a line; the control takes the next one. */
+.new-course label:not(.check) { flex-direction: row; flex-wrap: wrap; align-items: baseline; column-gap: 4px; }
+.new-course label:not(.check) > input, .new-course label:not(.check) > select, .new-course label:not(.check) > textarea { flex: 1 0 100%; }
 .new-course label .muted { font-weight: 400; }
 .new-course input, .new-course textarea, .new-course select { font: inherit; font-weight: 400; font-size: var(--fs-body); padding: var(--s-2) var(--s-3); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; resize: vertical; }
 .new-course .actions { margin-top: var(--s-1); }
@@ -780,13 +783,7 @@ input.train-input { max-width: 22rem; }
 .video-rate select { font: inherit; font-size: var(--fs-caption); color: var(--fg); background: var(--bg); border: var(--hairline) solid var(--faint); border-radius: var(--radius-1); padding: 2px 4px; }
 @media (max-width: 480px) { .video-rate { display: none; } }
 
-/* Folders on the courses page, and a course's filing controls. */
-.folder { margin: var(--s-6) 0 0; }
-.folder > summary { cursor: pointer; list-style: none; display: flex; align-items: baseline; gap: var(--s-2); padding: 0 0 var(--s-2); font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 600; letter-spacing: .02em; text-transform: uppercase; }
-.folder > summary::-webkit-details-marker { display: none; }
-.folder > summary::before { content: "▸"; font-size: .8em; transition: transform .15s; }
-.folder[open] > summary::before { transform: rotate(90deg); }
-.folder .folder-name { color: var(--fg); }
+/* A course's filing controls. */
 .filing { display: flex; flex-wrap: wrap; gap: var(--s-4); align-items: center; margin: var(--s-7, 3rem) 0 0; padding-top: var(--s-4); border-top: var(--hairline) solid var(--faint); font-size: var(--fs-small); }
 .filing label { display: inline-flex; align-items: center; gap: var(--s-2); }
 .filing input:not([type]) { font: inherit; padding: var(--s-1) var(--s-2); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: inherit; width: 10rem; }
@@ -802,3 +799,118 @@ figure.chart > div { width: 100%; }
 figure.html-mock { margin: var(--s-5) 0; border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-3); overflow: hidden; }
 figure.html-mock iframe { display: block; width: 100%; border: 0; background: var(--bg); }
 img.lesson-image { display: block; max-width: 100%; height: auto; margin: var(--s-5) auto; border-radius: var(--radius-2); }
+
+/* Courses page: a Finder-style column browser with an inspector. Full width; columns keep a fixed
+   width, as in the Finder, so opening one never reflows the others. The selected item is always
+   drawn in the accent, focused or not, so a click never flashes the old selection first. */
+.page.page-wide { max-width: none; padding-inline: var(--s-6); padding-bottom: var(--s-5); }
+.page-wide .new-course, .page-wide .starting { max-width: 44rem; }
+.finder { display: grid; grid-template-columns: minmax(0, 1fr) 360px; height: max(440px, calc(100vh - var(--top-h) - 220px)); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-3); overflow: hidden; background: var(--bg); }
+.finder:focus { outline: none; }
+.fc-cols { display: flex; overflow-x: auto; overflow-y: hidden; min-width: 0; overscroll-behavior-x: contain; }
+.fc-col { flex: 0 0 260px; width: 260px; min-width: 0; display: flex; flex-direction: column; min-height: 0; border-right: var(--hairline) solid var(--faint); }
+.fc-list { position: relative; flex: 1; min-height: 0; overflow-y: auto; scrollbar-gutter: stable; padding: var(--s-1); display: flex; flex-direction: column; gap: 1px; }
+.fc-foot { position: relative; flex: 0 0 auto; padding: var(--s-1); border-top: var(--hairline) solid var(--faint); }
+.fc-new { width: 100%; justify-content: flex-start; gap: var(--s-1); min-height: 28px; padding: 0 var(--s-2); border: 0; font-weight: 400; color: var(--muted); font-size: var(--fs-small); transition: none; }
+.fc-new:hover, .fc-new[aria-expanded="true"] { background: var(--hover); color: var(--fg); border: 0; }
+.fc-new > span[aria-hidden] { font-size: 16px; line-height: 1; width: 16px; text-align: center; }
+.fc-new-in { overflow: hidden; text-overflow: ellipsis; }
+.fc-menu { position: absolute; left: var(--s-1); right: var(--s-1); bottom: calc(100% - 2px); z-index: var(--z-popover); display: flex; flex-direction: column; padding: var(--s-1); background: var(--bg); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-3); box-shadow: var(--shadow); }
+.fc-menu button { justify-content: flex-start; border: 0; min-height: 30px; padding: 0 var(--s-2); font-weight: 400; transition: none; }
+.fc-menu button:hover { background: var(--accent-fill); color: var(--accent-fg); border: 0; }
+.fc-menu button:hover .fi { color: var(--accent-fg); }
+.fc-menu button:hover .fi-folder { fill: var(--accent-fg); }
+.fc-naming { background: var(--hover); }
+.fc-context { position: fixed; z-index: var(--z-popover); min-width: 200px; display: flex; flex-direction: column; padding: var(--s-1); background: var(--bg); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-3); box-shadow: var(--shadow); font-size: var(--fs-ui); }
+.fc-context-title { padding: var(--s-1) var(--s-2) var(--s-1); font-size: var(--fs-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 280px; }
+.fc-context button { justify-content: flex-start; outline: none; border: 0; min-height: 30px; padding: 0 var(--s-2); font-weight: 400; transition: none; }
+.fc-context button:hover, .fc-context button:focus-visible { background: var(--accent-fill); color: var(--accent-fg); border: 0; outline: none; }
+.fc-context button:hover .fi, .fc-context button:focus-visible .fi { color: var(--accent-fg); }
+.fc-context button:hover .fi-folder, .fc-context button:focus-visible .fi-folder { fill: var(--accent-fg); }
+.fc-naming input { flex: 1; min-width: 0; font: inherit; font-size: var(--fs-ui); padding: 2px var(--s-1); border: var(--hairline) solid var(--accent); border-radius: var(--radius-1); background: var(--bg); color: var(--fg); outline: none; }
+.modal-scrim { position: fixed; inset: 0; z-index: var(--z-drawer); background: var(--scrim); display: flex; align-items: flex-start; justify-content: center; padding: var(--s-8) var(--s-4) var(--s-4); overflow-y: auto; }
+.modal { width: min(44rem, 100%); background: var(--bg); border-radius: var(--radius-3); box-shadow: var(--shadow); padding: var(--s-5); }
+.page .modal h2 { margin: 0 0 var(--s-4); font-size: var(--fs-h2); }
+.modal .new-course { margin: 0; padding: 0; border: 0; }
+.fc-spacer { flex: 1 0 0; }
+.fc-item { display: flex; align-items: center; justify-content: flex-start; gap: var(--s-2); width: 100%; min-height: 0; text-align: left; padding: 6px var(--s-2); border: 0; border-radius: var(--radius-2); background: none; color: var(--fg); font: inherit; font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 400; cursor: default; transition: none; user-select: none; -webkit-tap-highlight-color: transparent; }
+.fc-item:hover { background: var(--hover); border: 0; }
+.fc-item:focus { outline: none; }
+.fc-item:focus-visible { box-shadow: inset 0 0 0 2px var(--line-strong); }
+.fc-item.is-selected { background: var(--faint); }
+.fc-item.is-current, .fc-item.is-current:hover { background: var(--accent-fill); color: var(--accent-fg); }
+.fc-item.is-current .fc-sub, .fc-item.is-current .fc-num, .fc-item.is-current .fc-chev { color: var(--accent-fg); opacity: .7; }
+.fc-item.is-current .fi { color: var(--accent-fg); }
+.fc-item.is-current .fi-folder { fill: var(--accent-fg); }
+.fc-item.is-dim:not(.is-current) .fc-title { color: var(--muted); }
+.fc-label { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.fc-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fc-sub { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.fi { width: 16px; height: 16px; flex: 0 0 16px; color: var(--muted); }
+.fi-folder { fill: var(--accent); color: var(--accent); opacity: .85; }
+.fc-chev { width: 12px; height: 12px; flex: 0 0 12px; color: var(--muted); }
+.fc-empty { padding: var(--s-3); font-size: var(--fs-small); }
+.fc-inspector { min-width: 0; display: flex; flex-direction: column; overflow: hidden; border-left: var(--hairline) solid var(--line-strong); background: var(--code); font-size: var(--fs-ui); line-height: var(--lh-ui); }
+.fc-inspector.is-empty { justify-content: center; text-align: center; padding: var(--s-5); }
+.fi-body { flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden; overflow-wrap: anywhere; scrollbar-gutter: stable; padding: var(--s-5); display: flex; flex-direction: column; gap: var(--s-3); }
+.fi-foot { flex: 0 0 auto; display: flex; justify-content: flex-end; padding: var(--s-3) var(--s-5); border-top: var(--hairline) solid var(--faint); }
+.fi-go { padding-inline: var(--s-5); text-decoration: none; }
+/* Dragging a course: the folder or column it would land in. */
+.fc-item.is-drop, .fc-item.is-drop:hover { background: var(--hover); box-shadow: inset 0 0 0 2px var(--accent); }
+.fc-list.is-drop { background: var(--hover); }
+.fc-item.is-dragged { opacity: .4; }
+.fc-item.is-overlay { box-sizing: border-box; width: 100%; height: 100%; background: var(--bg); box-shadow: var(--shadow); cursor: grabbing; border: var(--hairline) solid var(--line-strong); }
+.fc-item.is-overlay.is-current { background: var(--accent-fill); border-color: var(--accent-fill); }
+.finder.is-dragging, .finder.is-dragging * { cursor: grabbing; }
+.finder.is-dragging .fc-item:not(.is-drop):not(.is-current):hover { background: none; }
+.fi-head { display: flex; align-items: center; gap: var(--s-2); }
+.fi-head .fi { width: 20px; height: 20px; flex-basis: 20px; }
+.fi-kind { font-size: var(--fs-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; color: var(--muted); font-weight: 600; }
+.page .fc-inspector h2.fi-title { font-size: var(--fs-h3); line-height: var(--lh-h3); margin: 0; }
+.fi-desc { margin: 0; }
+.fi-crumb { margin: 0; font-size: var(--fs-small); }
+.page .fc-inspector h3.fi-sub { font-size: var(--fs-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; color: var(--muted); margin: var(--s-2) 0 0; }
+.fi-objectives { margin: 0; padding-left: var(--s-4); display: flex; flex-direction: column; gap: var(--s-1); }
+.fi-objectives .quiz-status { margin-right: var(--s-1); }
+.fi-meta { display: grid; grid-template-columns: auto 1fr; gap: var(--s-1) var(--s-3); margin: var(--s-2) 0 0; padding-top: var(--s-3); border-top: var(--hairline) solid var(--faint); }
+.fi-meta dt { color: var(--muted); }
+.fi-meta dd { margin: 0; }
+.fi-rename { display: flex; gap: var(--s-2); align-items: flex-end; flex-wrap: wrap; }
+.fi-rename label { display: flex; flex-direction: column; gap: var(--s-1); color: var(--muted); flex: 1; }
+.fi-rename input { font: inherit; padding: var(--s-1) var(--s-2); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); background: var(--bg); color: var(--fg); }
+.fi-note { font-size: var(--fs-small); margin: 0; }
+.fi-context { display: flex; flex-direction: column; gap: var(--s-1); }
+.fi-context-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--s-2); }
+.page .fc-inspector .fi-context h3.fi-sub { margin: 0; }
+.fi-context-status { font-size: var(--fs-caption); }
+.fi-context .tiptap, .fi-context .ProseMirror { min-height: 140px; padding: var(--s-2) var(--s-3); background: var(--bg); border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2); font-size: var(--fs-ui); line-height: var(--lh-ui); outline: none; }
+.fi-context .ProseMirror:focus { border-color: var(--accent); }
+.fi-context .ProseMirror p { margin: 0 0 var(--s-2); }
+.fi-context .ProseMirror > :last-child { margin-bottom: 0; }
+@media (max-width: 760px) {
+  .page.page-wide { padding-inline: var(--s-4); }
+  .finder { grid-template-columns: 1fr; grid-template-rows: minmax(300px, 55vh) auto; height: auto; }
+  .fc-col { flex-basis: 70vw; }
+  .fc-inspector { min-width: 0; overflow-x: hidden; overflow-wrap: anywhere; border-left: 0; border-top: var(--hairline) solid var(--line-strong); }
+}
+
+/* A rich field in place of a textarea: a field-styled notes editor that starts at two rows and
+   grows with its text to five, then scrolls. Rows are line-height units, so paragraphs carry no
+   margin of their own. */
+.rich-field { display: flex; flex-direction: column; gap: var(--s-1); font-size: var(--fs-ui); line-height: var(--lh-ui); font-weight: 500; }
+.rich-field .rich-label { cursor: default; }
+.rich-field .rich-label .muted { font-weight: 400; }
+.rich-field .notes-editor.rich-input {
+  --row: 1.5em;
+  min-height: calc(2 * var(--row) + 2 * var(--s-2) + 2px);
+  max-height: calc(5 * var(--row) + 2 * var(--s-2) + 2px);
+  overflow-y: auto; overscroll-behavior: contain;
+  padding: var(--s-2) var(--s-3); box-sizing: border-box;
+  font-size: var(--fs-body); line-height: var(--row); font-weight: 400;
+  background: var(--bg); color: var(--fg);
+  border: var(--hairline) solid var(--line-strong); border-radius: var(--radius-2);
+  cursor: text;
+}
+.rich-field .notes-editor.rich-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-fill) 45%, transparent); }
+.rich-field .notes-editor.rich-input p, .rich-field .notes-editor.rich-input ul, .rich-field .notes-editor.rich-input ol, .rich-field .notes-editor.rich-input blockquote { margin: 0; }
+.rich-field .notes-editor.rich-input li > p { margin: 0; }

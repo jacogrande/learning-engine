@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { post, put, useLive, useJobs, type Course, type Doc, type QuizState, type Sheet, type Grade, type Job, type SyncStatus } from "./api";
 import { Markdown } from "./Markdown";
+import { RichField } from "./Editor";
 import { QuizForm, QuizReview } from "./Quiz";
 import { JobBar } from "./JobBar";
 import { Reader } from "./Reader";
@@ -10,6 +11,7 @@ import { StatsPage } from "./Stats";
 import { CardsPage } from "./Cards";
 import { NotebookPage } from "./Notebook";
 import { VocabCapture, VocabPage } from "./Vocab";
+import { Browser } from "./Library";
 import { TrainPage } from "./Train";
 
 // A server started before the client was updated still sends objectives as strings.
@@ -167,25 +169,21 @@ function Courses() {
   const { data } = useLive<Course[]>("/api/courses");
   const jobs = useJobs();
   const starting = jobs.filter((j) => j.kind === "start" || j.kind === "brief");
-  const [open, setOpen] = useState(false);
+  // The New course dialog: closed (undefined), or open for a folder (null is the top level).
+  const [newIn, setNewIn] = useState<string | null | undefined>(undefined);
+  const { data: folders } = useLive<string[]>("/api/folders");
   const { data: rv } = useLive<{ dueCount: number; total: number; streak: number; next: string | null }>("/api/review/summary", ["answer", "card"]);
-  const status = (c: Course) => {
-    if (c.format === "brief") return c.modules[0]?.status === "ready" ? (c.progress?.done ? "Brief · done" : "Brief") : "Brief · writing";
-    if (c.stage === "baseline") return "Baseline waiting";
-    if (c.stage === "assessed") return "Outline pending";
-    const done = c.progress?.done ?? 0, n = c.modules.length;
-    return done === n ? `All ${n} modules done` : `${done} of ${n} modules done`;
-  };
-  const resume = (c: Course) => {
-    const r = c.progress?.resume;
-    if (r) return <Link to={`/c/${c.slug}/m/${r.module}/${r.file}`} className="btn resume">Resume · {r.moduleTitle} · {r.title} →</Link>;
-    if (c.progress?.nextToGenerate) return <Link to={`/c/${c.slug}`} className="btn resume">Next module not generated yet →</Link>;
-    return null;
-  };
   return (
-    <Shell crumbs={[{ label: "Courses" }]} className="page">
-      <div className="page-head"><h1>Courses</h1>{!open && <button className="primary" onClick={() => setOpen(true)}>New course</button>}</div>
-      {open && <NewCourse onDone={() => setOpen(false)} />}
+    <Shell crumbs={[{ label: "Courses" }]} className="page page-wide">
+      <div className="page-head"><h1>Courses</h1><button className="primary" onClick={() => setNewIn(null)}>New course</button></div>
+      {newIn !== undefined && (
+        <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) setNewIn(undefined); }}>
+          <div className="modal" role="dialog" aria-modal="true" aria-label="New course" onKeyDown={(e) => { if (e.key === "Escape") setNewIn(undefined); }}>
+            <h2>New course{newIn ? <span className="muted"> in {newIn.split("/").join(" › ")}</span> : null}</h2>
+            <NewCourse folder={newIn} onDone={() => setNewIn(undefined)} />
+          </div>
+        </div>
+      )}
       {rv && rv.total > 0 && (
         <p className="due-line">
           <Link to="/review">{rv.dueCount > 0 ? `Due today: ${rv.dueCount}` : "Nothing due today"}</Link>
@@ -193,67 +191,33 @@ function Courses() {
           {rv.dueCount === 0 && rv.next && <span className="muted"> · next {new Date(rv.next).toLocaleDateString()}</span>}
         </p>
       )}
-      {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — {j.kind === "brief" ? "researching the topic and planning the brief; the module writes itself after" : "researching the subject and writing the baseline"}. It appears below when ready ({j.activity ?? "queued"}).</p>)}
-      {data?.length === 0 && starting.length === 0 && !open && (
+      {starting.map((j) => <p key={j.id} className="muted starting">Starting “{j.ref}” — {j.kind === "brief" ? "researching the topic and planning the brief; the module writes itself after" : "researching the subject and writing the baseline"}. It appears in the browser below when ready ({j.activity ?? "queued"}).</p>)}
+      {data?.length === 0 && starting.length === 0 && newIn === undefined && !folders?.length && (
         <p className="muted">No courses yet. Start one above, or in a terminal run <code>claude</code> here and type <code>/start-course &lt;topic&gt;</code>.</p>
       )}
-      {groups(data ?? []).map(([folder, cs]) => {
-        const list = (
-          <ul className="cards">
-            {cs.map((c) => (
-              <li key={c.slug}>
-                <Link to={c.stage === "baseline" && c.format !== "brief" ? `/c/${c.slug}/baseline` : `/c/${c.slug}`}>
-                  <h2>{c.title}</h2>
-                  <p className="muted">{status(c)}{c.depth && c.format !== "brief" ? ` · ${c.depth}` : ""}{c.review ? "" : " · not in daily review"}</p>
-                </Link>
-                {resume(c)}
-              </li>
-            ))}
-          </ul>
-        );
-        return folder === null ? <div key="">{list}</div> : <Folder key={folder} name={folder} count={cs.length}>{list}</Folder>;
-      })}
+      {data && (data.length > 0 || !!folders?.length) && <Browser courses={data} folders={folders ?? []} onNewCourse={setNewIn} />}
     </Shell>
   );
 }
 
-// Unfiled courses first, then each folder in name order.
-function groups(cs: Course[]): [string | null, Course[]][] {
-  const by = new Map<string | null, Course[]>();
-  for (const c of cs) (by.get(c.folder) ?? by.set(c.folder, []).get(c.folder)!).push(c);
-  return [...by.entries()].sort(([a], [b]) => (a === null ? -1 : b === null ? 1 : a.localeCompare(b)));
-}
-
-// A folder on the courses page. Open or closed is remembered per browser.
-function Folder({ name, count, children }: { name: string; count: number; children: React.ReactNode }) {
-  const key = `folder:${name}`;
-  const [open, setOpen] = useState(() => { try { return localStorage.getItem(key) !== "closed"; } catch { return true; } });
-  return (
-    <details className="folder" open={open} onToggle={(e) => {
-      const o = (e.currentTarget as HTMLDetailsElement).open; setOpen(o);
-      try { localStorage.setItem(key, o ? "open" : "closed"); } catch {}
-    }}>
-      <summary><span className="folder-name">{name}</span> <span className="muted">{count}</span></summary>
-      {children}
-    </details>
-  );
-}
-
 // The clarifying questions /start-course (or /start-brief) would ask in a terminal, asked here instead.
-function NewCourse({ onDone }: { onDone: () => void }) {
-  const [f, setF] = useState({ format: "course", subject: "", depth: "practitioner", know: "", goals: "", produce: "", angle: "", folder: "" });
+function NewCourse({ onDone, folder = null }: { onDone: () => void; folder?: string | null }) {
+  const [f, setF] = useState({ format: "course", subject: "", depth: "practitioner", know: "", goals: "", produce: "", angle: "", folder: folder ?? "" });
   const [review, setReview] = useState(true);
-  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF({ ...f, [k]: e.target.value });
+  const set = (k: keyof typeof f) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => setF((p) => ({ ...p, [k]: e.target.value }));
+  // Rich fields hand back markdown; the prompt takes it as written.
+  const setRich = (k: keyof typeof f) => (md: string) => setF((p) => ({ ...p, [k]: md }));
   const setFormat = (format: string) => {
     // A brief is usually work: file it there and keep it out of the daily review, unless changed.
-    setF({ ...f, format, folder: format === "brief" && !f.folder ? "Work" : format === "course" && f.folder === "Work" ? "" : f.folder });
+    // Unless it was opened inside a folder, which keeps that folder.
+    setF({ ...f, format, folder: folder ? f.folder : format === "brief" && !f.folder ? "Work" : format === "course" && f.folder === "Work" ? "" : f.folder });
     setReview(format !== "brief");
   };
   const [busy, setBusy] = useState(false);
   const brief = f.format === "brief";
   const filing = (
     <>
-      <label>Folder <span className="muted">(optional; groups it on this page)</span><input value={f.folder} onChange={set("folder")} placeholder="e.g. Work" /></label>
+      <label>Folder <span className="muted">(optional; a path like Work/Clients nests it)</span><input value={f.folder} onChange={set("folder")} placeholder="e.g. Work" /></label>
       <label className="check"><input type="checkbox" checked={review} onChange={(e) => setReview(e.target.checked)} /> Include in the daily review <span className="muted">(its own review page works either way)</span></label>
     </>
   );
@@ -266,9 +230,9 @@ function NewCourse({ onDone }: { onDone: () => void }) {
       {brief ? (
         <>
           <label>Topic<input autoFocus required value={f.subject} onChange={set("subject")} placeholder="e.g. campsite availability rules for admins" /></label>
-          <label>What are you building or deciding? <span className="muted">(examples come from here)</span><textarea rows={2} value={f.produce} onChange={set("produce")} placeholder="e.g. a feature letting park admins set booking windows, minimum stays and blackout dates" /></label>
-          <label>What do you need to be able to do or discuss? <span className="muted">(optional)</span><textarea rows={2} value={f.goals} onChange={set("goals")} placeholder="e.g. hold my own in a spec review; know which patterns competitors ship" /></label>
-          <label>What do you already know? <span className="muted">(optional)</span><textarea rows={2} value={f.know} onChange={set("know")} /></label>
+          <RichField label="What are you building or deciding?" hint="(examples come from here)" value={f.produce} onChange={setRich("produce")} placeholder="e.g. a feature letting park admins set booking windows, minimum stays and blackout dates" />
+          <RichField label="What do you need to be able to do or discuss?" hint="(optional)" value={f.goals} onChange={setRich("goals")} placeholder="e.g. hold my own in a spec review; know which patterns competitors ship" />
+          <RichField label="What do you already know?" hint="(optional)" value={f.know} onChange={setRich("know")} />
           <label>Anything to emphasize or avoid? <span className="muted">(optional)</span><input value={f.angle} onChange={set("angle")} /></label>
           {filing}
           <div className="actions">
@@ -287,9 +251,9 @@ function NewCourse({ onDone }: { onDone: () => void }) {
           <option value="expert">Expert — theory, debates, the edges</option>
         </select>
       </label>
-      <label>What do you already know or have done?<textarea rows={2} value={f.know} onChange={set("know")} /></label>
-      <label>What do you want to be able to do afterward?<textarea rows={2} value={f.goals} onChange={set("goals")} /></label>
-      <label>What are you producing with it right now? <span className="muted">(examples come from here)</span><textarea rows={2} value={f.produce} onChange={set("produce")} placeholder="e.g. weekly status emails, product specs, short fiction" /></label>
+      <RichField label="What do you already know or have done?" value={f.know} onChange={setRich("know")} />
+      <RichField label="What do you want to be able to do afterward?" value={f.goals} onChange={setRich("goals")} />
+      <RichField label="What are you producing with it right now?" hint="(examples come from here)" value={f.produce} onChange={setRich("produce")} placeholder="e.g. weekly status emails, product specs, short fiction" />
       <label>Anything to emphasize or avoid? <span className="muted">(optional)</span><input value={f.angle} onChange={set("angle")} /></label>
       {filing}
       <div className="actions">

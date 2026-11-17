@@ -1,7 +1,7 @@
 // A Tiptap editor whose document is markdown. Used for notes and the end-of-module explanation.
 // Selecting text raises a toolbar: bold, italic, underline, strikethrough, code, link, and a
 // background colour.
-import { useEffect, useImperativeHandle, useRef, forwardRef } from "react";
+import { useEffect, useImperativeHandle, useRef, useState, forwardRef, type ReactNode } from "react";
 import { useEditor, useEditorState, EditorContent, type Editor as TiptapEditor } from "@tiptap/react";
 import { BubbleMenu } from "@tiptap/react/menus";
 import StarterKit from "@tiptap/starter-kit";
@@ -39,15 +39,15 @@ const ColorHighlight = Highlight.extend({
   },
 }).configure({ multicolor: true });
 
-export type EditorHandle = { insertHtml: (html: string) => void; getMarkdown: () => string; replace: (markdown: string) => void };
+export type EditorHandle = { insertHtml: (html: string) => void; getMarkdown: () => string; replace: (markdown: string) => void; focus: () => void };
 
-export const Editor = forwardRef<EditorHandle, { value: string | null; onChange: (markdown: string) => void; placeholder: string; className?: string }>(
-  function Editor({ value, onChange, placeholder, className }, ref) {
+export const Editor = forwardRef<EditorHandle, { value: string | null; onChange: (markdown: string) => void; placeholder: string; className?: string; ariaLabel?: string }>(
+  function Editor({ value, onChange, placeholder, className, ariaLabel }, ref) {
     const loaded = useRef(false);
     const placed = useRef(false);   // the learner has put the cursor somewhere: insert there, not at the end
     const editor = useEditor({
       extensions: [StarterKit.configure({ link: { openOnClick: true, autolink: true } }), ColorHighlight, Markdown, Placeholder.configure({ placeholder })],
-      editorProps: { attributes: { class: `notes-editor ${className ?? ""}` } },
+      editorProps: { attributes: { class: `notes-editor ${className ?? ""}`, role: "textbox", "aria-multiline": "true", ...(ariaLabel ? { "aria-label": ariaLabel } : {}) } },
       onFocus() { placed.current = true; },
       onUpdate({ editor }) { if (loaded.current) onChange(editor.getMarkdown().replace(/^\s+/, "")); },
     });
@@ -65,6 +65,7 @@ export const Editor = forwardRef<EditorHandle, { value: string | null; onChange:
       },
       getMarkdown: () => editor?.getMarkdown().replace(/^\s+/, "") ?? "",
       replace(markdown) { editor?.commands.setContent(markdown, { contentType: "markdown", emitUpdate: false }); },
+      focus() { editor?.commands.focus("end"); },
     }), [editor]);
     return (
       <>
@@ -74,6 +75,21 @@ export const Editor = forwardRef<EditorHandle, { value: string | null; onChange:
     );
   },
 );
+
+// A form field in place of a textarea: the notes editor (markdown, the same selection toolbar),
+// starting at two rows and growing with its text up to five, then scrolling. The label is part of
+// it, and clicking the label puts the cursor in the field, as a <label> does for a textarea.
+export function RichField({ label, hint, value, onChange, placeholder = "" }: { label: string; hint?: ReactNode; value: string; onChange: (markdown: string) => void; placeholder?: string }) {
+  const ed = useRef<EditorHandle>(null);
+  // The initial document only; later edits flow out through onChange.
+  const [initial] = useState(value);
+  return (
+    <div className="rich-field">
+      <span className="rich-label" onMouseDown={(e) => { e.preventDefault(); ed.current?.focus(); }}>{label}{hint && <> <span className="muted">{hint}</span></>}</span>
+      <Editor ref={ed} value={initial} onChange={onChange} placeholder={placeholder} ariaLabel={label} className="rich-input" />
+    </div>
+  );
+}
 
 const MOD = /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+";
 

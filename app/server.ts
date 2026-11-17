@@ -2,7 +2,7 @@
 import index from "./client/index.html";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, join, resolve } from "node:path";
-import { COURSES_DIR, NOTES_DIR, listCourses, getCourse, getDoc, freeSlug, setCourseMeta, type Course } from "./server/content";
+import { COURSES_DIR, NOTES_DIR, listCourses, getCourse, getDoc, freeSlug, setCourseMeta, listFolders, addFolder, renameFolder, removeFolder, getFolderContext, setFolderContext, type Course } from "./server/content";
 import { db, id, now } from "./server/db";
 import { enqueue, cancel, jobs, jobLog, history } from "./server/jobs";
 import { sse, watchContent, broadcast } from "./server/events";
@@ -55,14 +55,14 @@ const CONFIDENCE = ["", "guessing", "fairly sure", "sure"];
 type Sheet = { answers: Record<string, string>; confidence?: Record<string, number>; notes?: Record<string, string> };
 // A brief: one module on a topic, no baseline. The server picks the slug so it can generate the
 // module as soon as the research and the outline are written.
-async function startBrief(b: { subject: string; know?: string; goals?: string; produce?: string; angle?: string }, filing: string) {
+async function startBrief(b: { subject: string; know?: string; goals?: string; produce?: string; angle?: string }, filing: string, folder: string | null) {
   const slug = await freeSlug(b.subject);
   const answers = [
     ["What they are building or deciding", b.produce], ["What they already know", b.know], ["What they need to be able to do or discuss", b.goals], ["Angle to emphasize or avoid", b.angle],
   ].filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v!.trim()}`).join("\n");
   const prompt = `/start-brief ${b.subject.trim()}\n\nSlug: ${slug}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given)"}${filing ? `\n\nFiling, for course.md:\n${filing}` : ""}`;
   return enqueue("new", "brief", prompt, {
-    ref: b.subject.trim().slice(0, 60),
+    ref: b.subject.trim().slice(0, 60), folder,
     then: async () => {
       const c = await getCourse(slug);
       const m = c?.modules[0];
@@ -369,13 +369,39 @@ Bun.serve({
         const b = (await req.json()) as { subject: string; format?: "course" | "brief"; depth?: string; know?: string; goals?: string; produce?: string; angle?: string; folder?: string; review?: boolean };
         if (!b.subject?.trim()) return json({ error: "subject required" }, 400);
         const filing = [b.folder?.trim() ? `- Folder: ${b.folder.trim()}` : "", b.review === false ? "- Daily review: off (write `review: false`)" : ""].filter(Boolean).join("\n");
-        if (b.format === "brief") return json(await startBrief(b, filing));
+        if (b.format === "brief") return json(await startBrief(b, filing, b.folder?.trim() || null));
         const answers = [
           ["Target depth", b.depth], ["What they already know or have done", b.know], ["What they want to be able to do afterward", b.goals],
           ["What they are producing with it right now", b.produce], ["Angle to emphasize or avoid", b.angle],
         ].filter(([, v]) => v?.trim()).map(([k, v]) => `- ${k}: ${v!.trim()}`).join("\n");
         const prompt = `/start-course ${b.subject.trim()}\n\nThe learner has already answered the clarifying questions. Do not ask any; use these:\n${answers || "- (no further answers given; choose sensible defaults for a working practitioner)"}${filing ? `\n\nFiling, for course.md:\n${filing}` : ""}`;
-        return json(enqueue("new", "start", prompt, { ref: b.subject.trim().slice(0, 60) }));
+        return json(enqueue("new", "start", prompt, { ref: b.subject.trim().slice(0, 60), folder: b.folder?.trim() || null }));
+      },
+    },
+    // Folders: list, make, rename (with everything under it), remove when empty.
+    "/api/folders": {
+      GET: async () => json(await listFolders()),
+      POST: async (req) => {
+        const p = await addFolder(((await req.json()) as { path?: string }).path ?? "");
+        if (!p) return json({ error: "a folder name is needed" }, 400);
+        sync.touch(); broadcast({ type: "content" }); return json({ path: p });
+      },
+      PUT: async (req) => {
+        const b = (await req.json()) as { from?: string; to?: string };
+        if (!(await renameFolder(b.from ?? "", b.to ?? ""))) return json({ error: "cannot rename to that" }, 400);
+        sync.touch(); broadcast({ type: "content" }); return json(await listFolders());
+      },
+      DELETE: async (req) => {
+        if (!(await removeFolder(q(req, "path")))) return json({ error: "the folder is not empty" }, 409);
+        sync.touch(); broadcast({ type: "content" }); return json(await listFolders());
+      },
+    },
+    "/api/folders/context": {
+      GET: async (req) => json({ markdown: await getFolderContext(q(req, "path")) }),
+      PUT: async (req) => {
+        const b = (await req.json()) as { path?: string; markdown?: string };
+        if (!(await setFolderContext(b.path ?? "", b.markdown ?? ""))) return json({ error: "a folder is needed" }, 400);
+        sync.touch(); return json({ ok: true });
       },
     },
     "/api/courses/:slug/meta": {
